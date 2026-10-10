@@ -2,55 +2,53 @@ import 'package:flutter/material.dart';
 
 import 'pairing_screen.dart';
 
-class CalculatorScreen extends StatefulWidget {
-  const CalculatorScreen({super.key});
+/// Pure calculator state machine with secret-code detection.
+class CalculatorEngine {
+  static const String secretCode = '1997';
 
-  @override
-  State<CalculatorScreen> createState() => _CalculatorScreenState();
-}
-
-class _CalculatorScreenState extends State<CalculatorScreen> {
   String _output = '0';
   String _currentInput = '';
   String _operand = '';
   double _num1 = 0;
   double _num2 = 0;
   bool _shouldResetInput = false;
-  final String _secretCode = '1997';
   String _secretBuffer = '';
 
-  void _onButtonPressed(String value) {
-    setState(() {
-      // Check for secret code
-      _secretBuffer += value;
-      if (_secretBuffer.length > 4) {
-        _secretBuffer = _secretBuffer.substring(_secretBuffer.length - 4);
-      }
-      if (_secretBuffer == _secretCode) {
-        _secretBuffer = '';
-        _navigateToChat();
-        return;
-      }
+  String get output => _output;
 
-      if (value == 'C') {
-        _clear();
-      } else if (value == '⌫') {
-        _backspace();
-      } else if (value == '+' || value == '-' || value == '×' || value == '÷') {
-        _setOperand(value);
-      } else if (value == '=') {
-        _calculate();
-      } else if (value == '%') {
-        _percentage();
-      } else if (value == '.') {
-        _addDecimal();
-      } else {
-        _addDigit(value);
-      }
-    });
+  /// Processes a calculator button [value].
+  /// Returns `true` when the secret code (`1997`) has just been entered.
+  bool press(String value) {
+    _secretBuffer += value;
+    if (_secretBuffer.length > secretCode.length) {
+      _secretBuffer = _secretBuffer.substring(
+        _secretBuffer.length - secretCode.length,
+      );
+    }
+    if (_secretBuffer == secretCode) {
+      _secretBuffer = '';
+      return true;
+    }
+
+    if (value == 'C') {
+      clear();
+    } else if (value == '⌫') {
+      backspace();
+    } else if (value == '+' || value == '-' || value == '×' || value == '÷') {
+      setOperand(value);
+    } else if (value == '=') {
+      calculate();
+    } else if (value == '%') {
+      percentage();
+    } else if (value == '.') {
+      addDecimal();
+    } else {
+      addDigit(value);
+    }
+    return false;
   }
 
-  void _clear() {
+  void clear() {
     _output = '0';
     _currentInput = '';
     _operand = '';
@@ -59,25 +57,28 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     _shouldResetInput = false;
   }
 
-  void _backspace() {
+  void backspace() {
     if (_currentInput.isNotEmpty) {
       _currentInput = _currentInput.substring(0, _currentInput.length - 1);
       _output = _currentInput.isEmpty ? '0' : _currentInput;
     }
   }
 
-  void _setOperand(String op) {
-    if (_currentInput.isNotEmpty) {
-      _num1 = double.parse(_currentInput);
+  void setOperand(String op) {
+    final parsed = double.tryParse(_currentInput);
+    if (parsed != null) {
+      _num1 = parsed;
       _operand = op;
       _shouldResetInput = true;
     }
   }
 
-  void _calculate() {
+  void calculate() {
     if (_operand.isEmpty || _currentInput.isEmpty) return;
+    final parsed = double.tryParse(_currentInput);
+    if (parsed == null) return;
 
-    _num2 = double.parse(_currentInput);
+    _num2 = parsed;
     double result = 0;
 
     switch (_operand) {
@@ -102,30 +103,22 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         break;
     }
 
-    _output = result == result.roundToDouble()
-        ? result.round().toString()
-        : result
-              .toStringAsFixed(8)
-              .replaceAll(RegExp(r'0+$'), '')
-              .replaceAll(RegExp(r'\.$'), '');
+    _output = _formatNumber(result);
     _currentInput = _output;
     _operand = '';
     _shouldResetInput = true;
   }
 
-  void _percentage() {
-    if (_currentInput.isNotEmpty) {
-      double value = double.parse(_currentInput);
-      value = value / 100;
-      _output = value
-          .toStringAsFixed(8)
-          .replaceAll(RegExp(r'0+$'), '')
-          .replaceAll(RegExp(r'\.$'), '');
+  void percentage() {
+    final parsed = double.tryParse(_currentInput);
+    if (parsed != null) {
+      final value = parsed / 100;
+      _output = _formatNumber(value);
       _currentInput = _output;
     }
   }
 
-  void _addDecimal() {
+  void addDecimal() {
     if (_shouldResetInput) {
       _currentInput = '0';
       _shouldResetInput = false;
@@ -136,7 +129,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     }
   }
 
-  void _addDigit(String digit) {
+  void addDigit(String digit) {
     if (_shouldResetInput) {
       _currentInput = '';
       _shouldResetInput = false;
@@ -147,6 +140,37 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       _currentInput += digit;
     }
     _output = _currentInput;
+  }
+
+  static String _formatNumber(double value) {
+    if (value == value.roundToDouble()) {
+      return value.round().toString();
+    }
+    return value
+        .toStringAsFixed(8)
+        .replaceAll(RegExp(r'0+$'), '')
+        .replaceAll(RegExp(r'\.$'), '');
+  }
+}
+
+class CalculatorScreen extends StatefulWidget {
+  const CalculatorScreen({super.key});
+
+  @override
+  State<CalculatorScreen> createState() => _CalculatorScreenState();
+}
+
+class _CalculatorScreenState extends State<CalculatorScreen> {
+  final CalculatorEngine _engine = CalculatorEngine();
+
+  void _onButtonPressed(String value) {
+    var shouldNavigate = false;
+    setState(() {
+      shouldNavigate = _engine.press(value);
+    });
+    if (shouldNavigate) {
+      _navigateToChat();
+    }
   }
 
   void _navigateToChat() {
@@ -203,7 +227,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
               padding: const EdgeInsets.all(24),
               alignment: Alignment.bottomRight,
               child: Text(
-                _output,
+                _engine.output,
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 64,
