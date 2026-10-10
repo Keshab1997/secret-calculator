@@ -30,6 +30,7 @@ class FirebaseService {
   DatabaseReference? _chatRef;
   String? _roomId;
   bool _isPaired = false;
+  bool _isOnline = true;
   final EncryptionService _encryption = EncryptionService();
 
   /// Unique per-install/session peer identifier used as `senderId` and status key.
@@ -195,40 +196,103 @@ class FirebaseService {
     return true;
   }
 
+  DatabaseReference? _ensureChatRef() {
+    if (_chatRef == null && _roomId != null && Firebase.apps.isNotEmpty) {
+      _chatRef = _db.ref().child('rooms').child(_roomId!).child('messages');
+    }
+    return _chatRef;
+  }
+
   // Stream of room members so the creator knows when a partner joins.
   Stream<DatabaseEvent> getRoomMembersStream() {
-    if (_roomId == null) {
+    if (_roomId == null || Firebase.apps.isEmpty) {
       return const Stream.empty();
     }
     return _db.ref().child('rooms').child(_roomId!).child('members').onValue;
   }
 
-  // Send a message
-  Future<void> sendMessage(String text, {String? imageUrl}) async {
-    if (_chatRef == null && _roomId != null && Firebase.apps.isNotEmpty) {
-      _chatRef = _db.ref().child('rooms').child(_roomId!).child('messages');
-    }
-    if (_chatRef == null) return;
+  // Send a message with optional reply quote and disappearing timer.
+  Future<void> sendMessage(
+    String text, {
+    String? imageUrl,
+    String? replyToText,
+    String? replyToSenderId,
+    int? expiresInSeconds,
+  }) async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
 
     final encryptedText = text.isNotEmpty ? _encryption.encrypt(text) : null;
+    final encryptedReply = (replyToText != null && replyToText.isNotEmpty)
+        ? _encryption.encrypt(replyToText)
+        : null;
+    final expiresAt = expiresInSeconds != null
+        ? DateTime.now()
+              .add(Duration(seconds: expiresInSeconds))
+              .millisecondsSinceEpoch
+        : null;
 
-    await _chatRef!.push().set({
+    await chatRef.push().set({
       'text': encryptedText,
       'imageUrl': imageUrl,
       'timestamp': ServerValue.timestamp,
       'senderId': _peerId,
+      'seen': false,
+      if (encryptedReply != null) 'replyToText': encryptedReply,
+      if (replyToSenderId != null) 'replyToSenderId': replyToSenderId,
+      if (expiresAt != null) 'expiresAt': expiresAt,
     });
+  }
+
+  /// Toggles an emoji reaction by this peer on [messageKey].
+  Future<void> toggleReaction(
+    String messageKey,
+    String emoji, {
+    String? currentReaction,
+  }) async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
+    final reactionRef = chatRef
+        .child(messageKey)
+        .child('reactions')
+        .child(_peerId);
+    if (currentReaction == emoji) {
+      await reactionRef.remove();
+    } else {
+      await reactionRef.set(emoji);
+    }
+  }
+
+  /// Marks incoming partner messages as seen.
+  Future<void> markMessagesSeen(Iterable<String> messageKeys) async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
+    for (final key in messageKeys) {
+      await chatRef.child(key).update({'seen': true});
+    }
+  }
+
+  /// Deletes a single message from the room for everyone.
+  Future<void> deleteMessage(String messageKey) async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
+    await chatRef.child(messageKey).remove();
+  }
+
+  /// Clears all messages in the current room.
+  Future<void> clearAllMessages() async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
+    await chatRef.remove();
   }
 
   // Listen for messages
   Stream<DatabaseEvent> getMessagesStream() {
-    if (_chatRef == null && _roomId != null && Firebase.apps.isNotEmpty) {
-      _chatRef = _db.ref().child('rooms').child(_roomId!).child('messages');
-    }
-    if (_chatRef == null) {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) {
       return const Stream.empty();
     }
-    return _chatRef!.orderByChild('timestamp').onValue;
+    return chatRef.orderByChild('timestamp').onValue;
   }
 
   // Upload image to Firebase Storage
@@ -246,7 +310,8 @@ class FirebaseService {
   }
 
   // Update online status keyed by this device's peerId.
-  Future<void> updateOnlineStatus(bool isOnline) async {
+  Future<void> updateOnlineStatus(bool isOnline, {bool? isTyping}) async {
+    _isOnline = isOnline;
     if (_roomId == null || Firebase.apps.isEmpty) return;
 
     final statusRef = _db
@@ -258,8 +323,15 @@ class FirebaseService {
 
     await statusRef.set({
       'isOnline': isOnline,
+      'isTyping': isTyping ?? false,
       'lastSeen': ServerValue.timestamp,
     });
+  }
+
+  /// Updates typing status for the current peer.
+  Future<void> updateTypingStatus(bool isTyping) async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
+    await updateOnlineStatus(_isOnline, isTyping: isTyping);
   }
 
   // Listen for partner's online status.

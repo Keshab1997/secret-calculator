@@ -1,5 +1,6 @@
 import 'package:calculator/main.dart';
 import 'package:calculator/screens/calculator_screen.dart';
+import 'package:calculator/screens/chat_screen.dart';
 import 'package:calculator/screens/pairing_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -112,6 +113,27 @@ void main() {
 
       expect(find.byType(PairingScreen), findsOneWidget);
       expect(find.text('Pair Device'), findsOneWidget);
+    });
+
+    testWidgets('ChatScreen renders themes, search, and emoji categories', (
+      WidgetTester tester,
+    ) async {
+      await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
+
+      expect(find.text('Secret Chat'), findsOneWidget);
+      expect(find.byTooltip('Quick Hide to Calculator'), findsOneWidget);
+
+      // Open categorized emoji picker
+      await tester.tap(find.byIcon(Icons.emoji_emotions_outlined));
+      await tester.pump();
+      expect(find.text('Smileys'), findsOneWidget);
+      expect(find.text('Love'), findsOneWidget);
+      expect(find.text('Secret'), findsOneWidget);
+
+      // Toggle search bar
+      await tester.tap(find.byTooltip('Search Messages'));
+      await tester.pump();
+      expect(find.byType(TextField), findsNWidgets(2));
     });
   });
 }
