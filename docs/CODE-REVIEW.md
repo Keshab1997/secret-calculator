@@ -29,17 +29,17 @@ opening `rooms/<code>` directly in the Firebase Console to inspect what is writt
 
 | # | Issue | Severity | Files |
 |---|-------|----------|-------|
-| P0-1 | Pairing is broken: 6-char code can never resolve to the real room key | Blocker | `firebase_service.dart`, `pairing_screen.dart` |
-| P0-2 | `senderId` stores the room id, not the sender | Blocker | `firebase_service.dart:66`, `chat_screen.dart:105` |
-| P0-3 | Messages duplicate on every update | High | `chat_screen.dart:89-119` |
-| P0-4 | Both peers write to the same `status` node (online/last seen is wrong) | High | `firebase_service.dart:90-117` |
-| P1-1 | "Encryption" is a hardcoded key + fixed IV, AES-128 not AES-256 | High (security) | `encryption_service.dart` |
-| P1-2 | No Firebase Realtime Database / Storage security rules | High (security) | repo root |
+| P0-1 | ~~Pairing is broken: 6-char code can never resolve to the real room key~~ ✅ fixed | Blocker | `firebase_service.dart`, `pairing_screen.dart` |
+| P0-2 | ~~`senderId` stores the room id, not the sender~~ ✅ fixed | Blocker | `firebase_service.dart`, `chat_screen.dart` |
+| P0-3 | ~~Messages duplicate on every update~~ ✅ fixed | High | `chat_screen.dart` |
+| P0-4 | ~~Both peers write to the same `status` node (online/last seen is wrong)~~ ✅ fixed | High | `firebase_service.dart`, `chat_screen.dart` |
+| P1-1 | ~~"Encryption" is a hardcoded key + fixed IV, AES-128 not AES-256~~ ✅ fixed (AES-256-GCM + random 12-byte nonce + per-room PBKDF2 key) | High (security) | `encryption_service.dart` |
+| P1-2 | ~~No Firebase Realtime Database / Storage security rules~~ ✅ fixed (`database.rules.json`, `storage.rules`, `firebase.json`) | High (security) | repo root |
 | P1-3 | ~~`google-services.json` committed to a public repo~~ ✅ fixed in `26d6f21` | High (security) | `android/app/google-services.json` |
-| P2-1 | Almost no tests (1 smoke test) though CI runs tests | Medium | `test/` |
-| P2-2 | 5 analyzer warnings | Low | `chat_screen.dart` |
-| P2-3 | Message/status `StreamSubscription`s never cancelled | Medium | `chat_screen.dart:64-78` |
-| P3-1 | Voice/video call buttons are "coming soon" stubs | Low / intentional | `chat_screen.dart:196-230` |
+| P2-1 | ~~Almost no tests (1 smoke test) though CI runs tests~~ ✅ fixed (18 unit + widget tests) | Medium | `test/` |
+| P2-2 | ~~5 analyzer warnings~~ ✅ fixed (`No issues found!`) | Low | `chat_screen.dart` |
+| P2-3 | ~~Message/status `StreamSubscription`s never cancelled~~ ✅ fixed | Medium | `chat_screen.dart`, `pairing_screen.dart` |
+| P3-1 | Voice/video call buttons are "coming soon" stubs | Low / intentional | `chat_screen.dart` |
 
 ---
 

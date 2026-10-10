@@ -1,0 +1,23 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "rooms": {
+      "$room": {
+        ".read": "$room.matches(/^[A-Z0-9]{6}$/)",
+        ".write": "$room.matches(/^[A-Z0-9]{6}$/)",
+        "messages": {
+          ".indexOn": ["timestamp"],
+          "$messageId": {
+            ".validate": "newData.hasChildren(['senderId', 'timestamp']) && newData.child('senderId').isString() && newData.child('senderId').val().length > 0"
+          }
+        },
+        "status": {
+          "$peerId": {
+            ".validate": "newData.hasChildren(['isOnline', 'lastSeen']) && newData.child('isOnline').isBoolean()"
+          }
+        }
+      }
+    }
+  }
+}
