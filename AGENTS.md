@@ -37,6 +37,11 @@ A secret messaging app disguised as a calculator. When the secret code `1997` is
 3. Firebase Realtime Database enabled
 4. Firebase Storage enabled
 
+## CI/CD Workflows
+- **Flutter CI**: Format check + Tests (manual trigger)
+- **Manual Build**: APK/AAB build (manual trigger)
+- **Web Preview**: GitHub Pages deployment (manual trigger)
+
 ## Build Notes
 - Use `flutter run` to test
 - Use `flutter build apk` for Android release
