@@ -1,0 +1,75 @@
+name: Flutter UI screenshots
+
+# Drop this file into <app>/.github/workflows/ and run it from Actions ->
+# "Flutter UI screenshots" -> Run workflow, typing the routes you want
+# photographed (`/settings,/profile`). It is manual only: nothing runs on a push
+# or pull request. An agent can drive it too - `python3 tool/see_screen.py
+# --route /settings` from the flutter-builder agent pack dispatches this, waits
+# and downloads the images, so a change can be *looked at* instead of guessed at.
+#
+# The app needs web support (`web/` in the repository, or set
+# `generate-web-platform: true` below). Apps that use platform-only plugins
+# (camera, bluetooth, local notifications) will not render on web - the capture
+# step reports a blank screen instead of showing one silently.
+
+on:
+  workflow_dispatch:
+    inputs:
+      routes:
+        description: Comma separated app routes to photograph, e.g. /settings,/profile
+        required: false
+        default: "/"
+      viewports:
+        description: Comma separated WxH viewports
+        required: false
+        default: "390x844,768x1024"
+      wait-ms:
+        description: Milliseconds to let the app settle before each screenshot
+        required: false
+        default: "8000"
+      dart-defines:
+        description: Compile-time defines, one KEY=VALUE per line (never secrets)
+        required: false
+        default: ""
+      note:
+        description: Free text shown in the run name (see_screen.py sets this)
+        required: false
+        default: ""
+
+# The note makes a dispatched run findable: see_screen.py searches for the run
+# it just started by this title instead of guessing from timestamps.
+run-name: Flutter UI screenshots${{ inputs.note && format(' — {0}', inputs.note) || '' }}
+
+# Both are required: `contents: write` to push the images to the
+# `ui-screenshots` branch, `pull-requests: write` to comment them.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ui:
+    # v1.14.0 is the first release that ships this workflow (older tags do not
+    # contain the file). Move this pin forward with scripts/bump-ref.sh.
+    uses: Keshab1997/flutter-builder/.github/workflows/ui-screenshots.yml@v1.14.1
+    with:
+      flutter-channel: stable
+      # List the screens this app actually has. `/` is the home screen; for
+      # anything deeper, give the route the app navigates to (`/settings`,
+      # `/profile`) or wire up an integration test. A dispatched run overrides
+      # this with the routes typed into the form / passed by see_screen.py.
+      routes: ${{ inputs.routes || '/' }}
+      viewports: ${{ inputs.viewports || '390x844,768x1024' }}
+      # `wait-ms` is a number in the reusable workflow, so the form's string is
+      # converted; the hyphenated input names need the bracket syntax.
+      wait-ms: ${{ fromJSON(inputs['wait-ms'] || '8000') }}
+      dart-defines: ${{ inputs['dart-defines'] || '' }}
+      # Apps that have never been built for the web have no web/ folder and
+      # `flutter build web` would fail. Set this once and the workflow generates
+      # the folder inside its own checkout (`flutter create --platforms=web .`):
+      # generate-web-platform: true
+      embed-in-pr: true
+    secrets: inherit

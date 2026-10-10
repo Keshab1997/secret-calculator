@@ -1,0 +1,32 @@
+name: Build Android APK or AAB (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      format:
+        description: Which Android file should be built?
+        required: true
+        type: choice
+        options:
+          - apk
+          - aab
+        default: apk
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.1
+    with:
+      flutter-channel: stable
+      build-apk: ${{ inputs.format == 'apk' }}
+      build-aab: ${{ inputs.format == 'aab' }}
+      artifact-retention-days: 14
+    secrets:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      # Optional for apps using ImgBB; extractable from the built APK/AAB.
+      IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}

@@ -1,0 +1,25 @@
+name: Flutter CI — Format, Analyze & Test
+
+# Manual only: nothing runs on push or pull request. Batch your changes, then
+# run this once from Actions -> Flutter CI — Format, Analyze & Test -> Run
+# workflow. That keeps small edits from spending a CI run each.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.1
+    with:
+      flutter-channel: stable
+      run-format-check: true
+      run-analyze: true
+      run-tests: true
+      build-apk: false
+      build-aab: false
