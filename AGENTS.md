@@ -12,17 +12,30 @@ A secret messaging app disguised as a calculator. When the secret code `1997` is
 - Full calculator functionality (+, -, ×, ÷, %)
 - Secret code detection (1997)
 - Hidden messaging screen with:
-  - Text chat
-  - Emoji support
-  - Image sharing
+  - Text chat (Firebase Realtime Database)
+  - Emoji support (32+ emojis)
+  - Image sharing (Firebase Storage)
   - Voice/video calling UI
-  - SMS integration UI
+  - End-to-End Encryption (AES-256)
+  - Fake notifications (calculator-themed)
+  - Online status tracking
+  - Last seen feature
+  - One-time pairing system
 
 ## Technical Stack
 - Flutter 3.47.7
 - Dart
 - Material Design 3
-- Firebase (to be added)
+- Firebase Core
+- Firebase Realtime Database
+- Firebase Storage
+- AES-256 Encryption
+
+## Setup Requirements
+1. Firebase project created
+2. google-services.json in android/app/
+3. Firebase Realtime Database enabled
+4. Firebase Storage enabled
 
 ## Build Notes
 - Use `flutter run` to test
