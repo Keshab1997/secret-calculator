@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 
 import '../services/firebase_service.dart';
@@ -13,7 +16,9 @@ class PairingScreen extends StatefulWidget {
 class _PairingScreenState extends State<PairingScreen> {
   final FirebaseService _firebase = FirebaseService();
   final TextEditingController _codeController = TextEditingController();
+  StreamSubscription<DatabaseEvent>? _membersSub;
   bool _isLoading = false;
+  bool _hasNavigated = false;
   String? _myCode;
   String? _error;
 
@@ -23,15 +28,25 @@ class _PairingScreenState extends State<PairingScreen> {
     _generateCode();
   }
 
+  @override
+  void dispose() {
+    _membersSub?.cancel();
+    _codeController.dispose();
+    super.dispose();
+  }
+
   Future<void> _generateCode() async {
     setState(() => _isLoading = true);
     try {
       await _firebase.createRoom();
+      if (!mounted) return;
       setState(() {
         _myCode = _firebase.getShortCode();
         _isLoading = false;
       });
+      _listenForPartnerJoin();
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to create room';
         _isLoading = false;
@@ -39,10 +54,35 @@ class _PairingScreenState extends State<PairingScreen> {
     }
   }
 
+  void _listenForPartnerJoin() {
+    _membersSub?.cancel();
+    _membersSub = _firebase.getRoomMembersStream().listen((event) {
+      final raw = event.snapshot.value;
+      if (raw is Map) {
+        final hasPartner = raw.keys.any(
+          (key) => key.toString() != _firebase.myPeerId,
+        );
+        if (hasPartner) {
+          _openChat();
+        }
+      }
+    });
+  }
+
+  void _openChat() {
+    if (!mounted || _hasNavigated) return;
+    _hasNavigated = true;
+    _membersSub?.cancel();
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => const ChatScreen()),
+    );
+  }
+
   Future<void> _joinRoom() async {
-    final code = _codeController.text.trim();
-    if (code.length != 6) {
-      setState(() => _error = 'Please enter a 6-character code');
+    final code = _codeController.text.trim().toUpperCase();
+    if (!FirebaseService.isValidRoomCode(code)) {
+      setState(() => _error = 'Please enter a valid 6-character code');
       return;
     }
 
@@ -52,14 +92,10 @@ class _PairingScreenState extends State<PairingScreen> {
     });
 
     try {
-      final success = await _firebase.joinRoom(code.toLowerCase());
+      final success = await _firebase.joinRoom(code);
+      if (!mounted) return;
       if (success) {
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const ChatScreen()),
-          );
-        }
+        _openChat();
       } else {
         setState(() {
           _error = 'Room not found';
@@ -67,6 +103,7 @@ class _PairingScreenState extends State<PairingScreen> {
         });
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to join room';
         _isLoading = false;
@@ -82,7 +119,7 @@ class _PairingScreenState extends State<PairingScreen> {
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
       ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.all(24.0),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

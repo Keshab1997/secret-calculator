@@ -1,11 +1,12 @@
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_database/firebase_database.dart';
-
+import 'dart:async';
 import 'dart:io';
 
-import '../services/firebase_service.dart';
+import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
 import '../services/encryption_service.dart';
+import '../services/firebase_service.dart';
 import '../services/notification_service.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -18,10 +19,13 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final List<ChatMessage> _messages = [];
+  final Set<String> _seenMessageKeys = <String>{};
   final ImagePicker _picker = ImagePicker();
   final FirebaseService _firebase = FirebaseService();
   final EncryptionService _encryption = EncryptionService();
   final NotificationService _notifications = NotificationService();
+  StreamSubscription<DatabaseEvent>? _messagesSub;
+  StreamSubscription<DatabaseEvent>? _statusSub;
   bool _showEmojiPicker = false;
   bool _isPartnerOnline = false;
   String _partnerLastSeen = '';
@@ -73,6 +77,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _messagesSub?.cancel();
+    _statusSub?.cancel();
+    _messageController.dispose();
     _firebase.updateOnlineStatus(false);
     super.dispose();
   }
@@ -87,60 +94,112 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _listenForMessages() {
-    _firebase.getMessagesStream().listen((event) {
-      if (event.snapshot?.value != null) {
-        final data = event.snapshot!.value as Map<dynamic, dynamic>;
-        data.forEach((key, value) {
-          final message = value as Map<dynamic, dynamic>;
-          final decryptedText = message['text'] != null
-              ? _encryption.decrypt(message['text'])
-              : null;
+    _messagesSub?.cancel();
+    _messagesSub = _firebase.getMessagesStream().listen((event) {
+      final raw = event.snapshot.value;
+      if (raw == null || raw is! Map) {
+        if (!mounted) return;
+        setState(_messages.clear);
+        return;
+      }
 
-          setState(() {
-            _messages.add(
-              ChatMessage(
-                text: decryptedText,
-                imageUrl: message['imageUrl'],
-                isMe:
-                    message['senderId'] ==
-                    _firebase.getShortCode().toLowerCase(),
-                timestamp: DateTime.fromMillisecondsSinceEpoch(
-                  message['timestamp'] ?? 0,
-                ),
-              ),
-            );
-          });
+      final entries = <MapEntry<String, Map<dynamic, dynamic>>>[];
+      raw.forEach((key, value) {
+        if (value is Map) {
+          entries.add(MapEntry(key.toString(), value));
+        }
+      });
 
-          // Show fake notification for new messages
-          if (message['senderId'] != _firebase.getShortCode().toLowerCase()) {
-            _notifications.showFakeNotification();
+      entries.sort((a, b) {
+        final tsA = (a.value['timestamp'] as int?) ?? 0;
+        final tsB = (b.value['timestamp'] as int?) ?? 0;
+        return tsA.compareTo(tsB);
+      });
+
+      final rebuilt = <ChatMessage>[];
+      var hasNewPartnerMessage = false;
+
+      for (final entry in entries) {
+        final message = entry.value;
+        final senderId = message['senderId']?.toString() ?? '';
+        final isMe = senderId == _firebase.myPeerId;
+
+        String? decryptedText;
+        final rawText = message['text'];
+        if (rawText is String && rawText.isNotEmpty) {
+          try {
+            decryptedText = _encryption.decrypt(rawText);
+          } on FormatException {
+            decryptedText = '[Unable to decrypt message]';
           }
-        });
+        }
+
+        rebuilt.add(
+          ChatMessage(
+            text: decryptedText,
+            imageUrl: message['imageUrl'] as String?,
+            isMe: isMe,
+            timestamp: DateTime.fromMillisecondsSinceEpoch(
+              (message['timestamp'] as int?) ?? 0,
+            ),
+          ),
+        );
+
+        final isNewKey = _seenMessageKeys.add(entry.key);
+        if (isNewKey && !isMe) {
+          hasNewPartnerMessage = true;
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(rebuilt);
+      });
+
+      if (hasNewPartnerMessage) {
+        _notifications.showFakeNotification();
       }
     });
   }
 
   void _listenForPartnerStatus() {
-    _firebase.getPartnerStatusStream().listen((event) {
-      if (event.snapshot?.value != null) {
-        final data = event.snapshot!.value as Map<dynamic, dynamic>;
-        setState(() {
-          _isPartnerOnline = data['isOnline'] ?? false;
-          if (data['lastSeen'] != null) {
-            final lastSeen = DateTime.fromMillisecondsSinceEpoch(
-              data['lastSeen'],
-            );
-            _partnerLastSeen =
-                '${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
+    _statusSub?.cancel();
+    _statusSub = _firebase.getPartnerStatusStream().listen((event) {
+      final raw = event.snapshot.value;
+      if (raw == null || raw is! Map) return;
+
+      Map<dynamic, dynamic>? partnerData;
+      if (raw.containsKey('isOnline') || raw.containsKey('lastSeen')) {
+        partnerData = raw;
+      } else {
+        for (final entry in raw.entries) {
+          if (entry.key.toString() != _firebase.myPeerId &&
+              entry.value is Map) {
+            partnerData = entry.value as Map<dynamic, dynamic>;
+            break;
           }
-        });
+        }
       }
+
+      if (partnerData == null || !mounted) return;
+
+      setState(() {
+        _isPartnerOnline = (partnerData!['isOnline'] as bool?) ?? false;
+        final rawLastSeen = partnerData['lastSeen'];
+        if (rawLastSeen is int) {
+          final lastSeen = DateTime.fromMillisecondsSinceEpoch(rawLastSeen);
+          _partnerLastSeen =
+              '${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
+        }
+      });
     });
   }
 
-  void _sendMessage({String? text, File? image}) async {
+  Future<void> _sendMessage({String? text, File? image}) async {
     if (text == null && image == null) return;
-    if (text != null && text.trim().isEmpty) return;
+    if (text != null && text.trim().isEmpty && image == null) return;
 
     String? imageUrl;
     if (image != null) {
@@ -154,14 +213,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _pickImage() async {
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
-      _sendMessage(image: File(image.path));
+      await _sendMessage(image: File(image.path));
     }
   }
 
   Future<void> _takePhoto() async {
     final XFile? image = await _picker.pickImage(source: ImageSource.camera);
     if (image != null) {
-      _sendMessage(image: File(image.path));
+      await _sendMessage(image: File(image.path));
     }
   }
 
