@@ -43,6 +43,8 @@ dependencies:
   encrypt: ^5.0.3
   # Notifications
   flutter_local_notifications: ^18.0.1
+  flutter_webrtc: ^1.6.2+hotfix.4
+  local_auth: ^3.0.2
 
 dev_dependencies:
   flutter_test:
