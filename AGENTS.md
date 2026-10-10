@@ -1,7 +1,12 @@
-# Secret Calculator - Agent Notes
+# Calculator - Secret Messaging App
 
 ## Project Overview
 A secret messaging app disguised as a calculator. When the secret code `1997` is entered, it reveals a hidden messaging interface.
+
+## App Identity
+- **App Name:** Calculator (displays as "Calculator" on phone)
+- **Package Name:** com.keshabstudios.calculator
+- **Secret Code:** 1997
 
 ## Features
 - Full calculator functionality (+, -, ×, ÷, %)
@@ -10,13 +15,14 @@ A secret messaging app disguised as a calculator. When the secret code `1997` is
   - Text chat
   - Emoji support
   - Image sharing
-  - Voice/video calling
-  - SMS integration
+  - Voice/video calling UI
+  - SMS integration UI
 
 ## Technical Stack
 - Flutter 3.47.7
 - Dart
 - Material Design 3
+- Firebase (to be added)
 
 ## Build Notes
 - Use `flutter run` to test
