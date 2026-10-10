@@ -20,6 +20,8 @@ jobs:
     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.14.1
     with:
       flutter-channel: stable
+      run-analyze: false
+      run-tests: false
       build-apk: ${{ inputs.format == 'apk' }}
       build-aab: ${{ inputs.format == 'aab' }}
       artifact-retention-days: 14

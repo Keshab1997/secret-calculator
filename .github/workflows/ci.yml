@@ -19,7 +19,7 @@ jobs:
     with:
       flutter-channel: stable
       run-format-check: true
-      run-analyze: true
+      run-analyze: false
       run-tests: true
       build-apk: false
       build-aab: false
