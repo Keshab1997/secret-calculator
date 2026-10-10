@@ -238,9 +238,9 @@ class FirebaseService {
       'timestamp': ServerValue.timestamp,
       'senderId': _peerId,
       'seen': false,
-      if (encryptedReply != null) 'replyToText': encryptedReply,
-      if (replyToSenderId != null) 'replyToSenderId': replyToSenderId,
-      if (expiresAt != null) 'expiresAt': expiresAt,
+      'replyToText': ?encryptedReply,
+      'replyToSenderId': ?replyToSenderId,
+      'expiresAt': ?expiresAt,
     });
   }
 
