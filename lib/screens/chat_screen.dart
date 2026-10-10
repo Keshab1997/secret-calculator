@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_database/firebase_database.dart';
@@ -8,7 +9,9 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
+import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
+import 'call_screen.dart';
 import 'pairing_screen.dart';
 
 class ChatThemePalette {
@@ -89,11 +92,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final FirebaseService _firebase = FirebaseService();
   final EncryptionService _encryption = EncryptionService();
   final NotificationService _notifications = NotificationService();
+  final NativeBridgeService _native = NativeBridgeService();
 
   StreamSubscription<DatabaseEvent>? _messagesSub;
   StreamSubscription<DatabaseEvent>? _statusSub;
+  StreamSubscription<DatabaseEvent>? _callSub;
   Timer? _typingDebounce;
   Timer? _expiryTimer;
+  Timer? _recordingTimer;
 
   bool _showEmojiPicker = false;
   bool _isSearching = false;
@@ -105,6 +111,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _selectedEmojiCategory = 0;
   int? _disappearingSeconds;
   ChatMessage? _replyingTo;
+
+  bool _isRecordingVoice = false;
+  int _recordingSeconds = 0;
+  String? _playingMessageId;
+  bool _isShowingIncomingCall = false;
 
   static const List<String> _reactionOptions = [
     '❤️',
@@ -219,6 +230,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _firebase.updateOnlineStatus(true);
     _listenForMessages();
     _listenForPartnerStatus();
+    _listenForIncomingCalls();
     _expiryTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       _pruneExpiredMessages();
     });
@@ -229,8 +241,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
     _expiryTimer?.cancel();
+    _recordingTimer?.cancel();
     _messagesSub?.cancel();
     _statusSub?.cancel();
+    _callSub?.cancel();
+    _native.stopRecording();
+    _native.stopAudio();
     _messageController.dispose();
     _searchController.dispose();
     _scrollController.dispose();
@@ -245,6 +261,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else {
       _firebase.updateOnlineStatus(false, isTyping: false);
     }
+  }
+
+  void _listenForIncomingCalls() {
+    _callSub?.cancel();
+    _callSub = _firebase.getCallStream().listen((event) {
+      final raw = event.snapshot.value;
+      if (raw == null || raw is! Map || !mounted) return;
+      final callerId = raw['callerId']?.toString() ?? '';
+      final status = raw['status']?.toString() ?? '';
+      final isVideo = raw['type']?.toString() == 'video';
+
+      if (status == 'ringing' &&
+          callerId.isNotEmpty &&
+          callerId != _firebase.myPeerId &&
+          !_isShowingIncomingCall) {
+        _isShowingIncomingCall = true;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) =>
+                CallScreen(isVideo: isVideo, isIncoming: true),
+          ),
+        ).whenComplete(() {
+          _isShowingIncomingCall = false;
+        });
+      }
+    });
   }
 
   void _pruneExpiredMessages() {
@@ -337,6 +380,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             id: entry.key,
             text: _safeDecrypt(message['text']),
             imageUrl: message['imageUrl'] as String?,
+            encryptedAudioData: message['audioData'] as String?,
+            audioDurationSeconds: message['audioDuration'] as int?,
             isMe: isMe,
             isSeen: isSeen,
             timestamp: DateTime.fromMillisecondsSinceEpoch(
@@ -426,6 +471,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _onInputChanged(String value) {
+    setState(() {});
     _firebase.updateTypingStatus(value.trim().isNotEmpty);
     _typingDebounce?.cancel();
     _typingDebounce = Timer(const Duration(seconds: 2), () {
@@ -433,9 +479,104 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _sendMessage({String? text, File? image}) async {
-    if (text == null && image == null) return;
-    if (text != null && text.trim().isEmpty && image == null) return;
+  Future<void> _startVoiceRecording() async {
+    final granted = await _native.ensureMicPermission();
+    if (!granted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Microphone permission is required')),
+      );
+      return;
+    }
+    final path = await _native.startRecording();
+    if (path == null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not start voice recording')),
+      );
+      return;
+    }
+    setState(() {
+      _isRecordingVoice = true;
+      _recordingSeconds = 0;
+    });
+    _recordingTimer?.cancel();
+    _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _recordingSeconds++);
+    });
+  }
+
+  Future<void> _cancelVoiceRecording() async {
+    _recordingTimer?.cancel();
+    final path = await _native.stopRecording();
+    if (path != null) {
+      try {
+        await File(path).delete();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _isRecordingVoice = false;
+      _recordingSeconds = 0;
+    });
+  }
+
+  Future<void> _finishAndSendVoiceRecording() async {
+    _recordingTimer?.cancel();
+    final duration = _recordingSeconds < 1 ? 1 : _recordingSeconds;
+    final path = await _native.stopRecording();
+    if (mounted) {
+      setState(() {
+        _isRecordingVoice = false;
+        _recordingSeconds = 0;
+      });
+    }
+    if (path == null) return;
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return;
+      final bytes = await file.readAsBytes();
+      await file.delete();
+      if (bytes.isEmpty) return;
+      await _sendMessage(
+        text: '🎤 Voice note (${duration}s)',
+        audioBase64: base64Encode(bytes),
+        audioDurationSeconds: duration,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _togglePlayVoiceNote(ChatMessage message) async {
+    if (message.encryptedAudioData == null) return;
+    if (_playingMessageId == message.id) {
+      await _native.stopAudio();
+      if (!mounted) return;
+      setState(() => _playingMessageId = null);
+      return;
+    }
+    setState(() => _playingMessageId = message.id);
+    final ok = await _native.playEncryptedAudio(
+      message.encryptedAudioData!,
+      _encryption,
+    );
+    if (!ok && mounted) {
+      setState(() => _playingMessageId = null);
+    }
+  }
+
+  Future<void> _sendMessage({
+    String? text,
+    File? image,
+    String? audioBase64,
+    int? audioDurationSeconds,
+  }) async {
+    if (text == null && image == null && audioBase64 == null) return;
+    if (text != null &&
+        text.trim().isEmpty &&
+        image == null &&
+        audioBase64 == null) {
+      return;
+    }
 
     final replyTarget = _replyingTo;
     setState(() {
@@ -452,6 +593,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await _firebase.sendMessage(
       text?.trim() ?? '',
       imageUrl: imageUrl,
+      audioBase64: audioBase64,
+      audioDurationSeconds: audioDurationSeconds,
       replyToText:
           replyTarget?.text ??
           (replyTarget?.imageUrl != null ? '📷 Photo' : null),
@@ -461,6 +604,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       expiresInSeconds: _disappearingSeconds,
     );
     _messageController.clear();
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickImage() async {
@@ -516,17 +660,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Wrap(
           children: [
             ListTile(
               leading: const Icon(Icons.call, color: Colors.greenAccent),
-              title: const Text('Encrypted Voice Call'),
+              title: const Text('Start Encrypted Voice Call'),
+              subtitle: const Text('Live P2P encrypted voice stream'),
               onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Voice call feature coming soon!'),
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CallScreen(isVideo: false),
                   ),
                 );
               },
@@ -536,15 +682,112 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 Icons.videocam,
                 color: Colors.lightBlueAccent,
               ),
-              title: const Text('Encrypted Video Call'),
+              title: const Text('Start Encrypted Video Call'),
+              subtitle: const Text('Live P2P video & encrypted audio call'),
               onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Video call feature coming soon!'),
+                Navigator.pop(sheetContext);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const CallScreen(isVideo: true),
                   ),
                 );
               },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSecuritySettingsDialog() {
+    final codeCtrl = TextEditingController(text: _firebase.customPasscode);
+    var bioEnabled = _firebase.biometricEnabled;
+    String? localError;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _theme.appBarColor,
+          title: const Row(
+            children: [
+              Icon(Icons.fingerprint, color: Colors.greenAccent),
+              SizedBox(width: 8),
+              Flexible(child: Text('Passcode & Biometric Lock')),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Custom Secret Calculator Code (4–8 digits):',
+                style: TextStyle(fontSize: 13, color: Colors.white70),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: codeCtrl,
+                keyboardType: TextInputType.number,
+                maxLength: 8,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  letterSpacing: 4,
+                  fontWeight: FontWeight.bold,
+                ),
+                decoration: InputDecoration(
+                  hintText: '1997',
+                  filled: true,
+                  fillColor: _theme.backgroundColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  errorText: localError,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Fingerprint / Screen Lock'),
+                subtitle: const Text(
+                  'Ask for device fingerprint before opening Secret Chat',
+                  style: TextStyle(fontSize: 12),
+                ),
+                value: bioEnabled,
+                onChanged: (val) {
+                  setDialogState(() => bioEnabled = val);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('CANCEL'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final ok = await _firebase.setCustomPasscode(codeCtrl.text);
+                if (!ok) {
+                  setDialogState(() {
+                    localError = 'Enter 4 to 8 digits (0-9)';
+                  });
+                  return;
+                }
+                await _firebase.setBiometricEnabled(bioEnabled);
+                if (!dialogContext.mounted) return;
+                Navigator.pop(dialogContext);
+                if (!mounted) return;
+                ScaffoldMessenger.of(this.context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Saved! Passcode: ${_firebase.customPasscode} • Biometric: ${bioEnabled ? "ON" : "OFF"}',
+                    ),
+                  ),
+                );
+              },
+              child: const Text('SAVE'),
             ),
           ],
         ),
@@ -566,7 +809,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Reaction bar
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 16,
@@ -897,6 +1139,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final emojiCategoryKeys = _emojiCategories.keys.toList();
     final currentEmojis =
         _emojiCategories[emojiCategoryKeys[_selectedEmojiCategory]]!;
+    final hasTypedText = _messageController.text.trim().isNotEmpty;
 
     return Scaffold(
       backgroundColor: _theme.backgroundColor,
@@ -997,7 +1240,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
         actions: [
-          // Quick Panic / Boss Key: immediately locks back to Calculator
           IconButton(
             icon: const Icon(Icons.calculate_outlined),
             tooltip: 'Quick Hide to Calculator',
@@ -1024,6 +1266,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               switch (value) {
                 case 'room_info':
                   _showRoomInfoDialog();
+                  break;
+                case 'security':
+                  _showSecuritySettingsDialog();
                   break;
                 case 'theme':
                   _showThemePicker();
@@ -1054,6 +1299,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Icon(Icons.vpn_key, size: 18, color: _theme.accentColor),
                     const SizedBox(width: 10),
                     Text('Room: ${_firebase.getShortCode()}'),
+                  ],
+                ),
+              ),
+              PopupMenuItem<String>(
+                value: 'security',
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.fingerprint,
+                      size: 18,
+                      color: Colors.greenAccent,
+                    ),
+                    const SizedBox(width: 10),
+                    Text('Passcode (${_firebase.customPasscode}) & Bio Lock'),
                   ],
                 ),
               ),
@@ -1115,7 +1374,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
       body: Column(
         children: [
-          // Encryption security banner
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -1123,15 +1381,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  Icons.shield_outlined,
-                  size: 13,
-                  color: _theme.accentColor,
-                ),
+                Icon(Icons.shield_outlined, size: 13, color: _theme.accentColor),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
-                    'AES-256-GCM encrypted • Long-press any message to react or reply',
+                    'AES-256-GCM encrypted • Tap mic for voice note • Long-press to react/reply',
                     style: TextStyle(fontSize: 11, color: Colors.grey[400]),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1139,7 +1393,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ],
             ),
           ),
-          // Messages list
           Expanded(
             child: displayedMessages.isEmpty
                 ? Center(
@@ -1171,7 +1424,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Messages are encrypted with AES-256-GCM',
+                          'Messages, voice notes & calls are AES-256-GCM encrypted',
                           style: TextStyle(
                             fontSize: 12,
                             color: Colors.grey[600],
@@ -1205,7 +1458,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     },
                   ),
           ),
-          // Categorized Emoji Picker
           if (_showEmojiPicker)
             Container(
               height: 230,
@@ -1251,13 +1503,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       itemBuilder: (context, index) {
                         return GestureDetector(
                           onTap: () {
-                            _messageController.text += currentEmojis[index];
-                            _messageController.selection =
-                                TextSelection.fromPosition(
-                                  TextPosition(
-                                    offset: _messageController.text.length,
-                                  ),
-                                );
+                            setState(() {
+                              _messageController.text += currentEmojis[index];
+                              _messageController.selection =
+                                  TextSelection.fromPosition(
+                                    TextPosition(
+                                      offset: _messageController.text.length,
+                                    ),
+                                  );
+                            });
                           },
                           child: Center(
                             child: Text(
@@ -1272,7 +1526,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-          // Reply preview bar
           if (_replyingTo != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1319,72 +1572,125 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-          // Message input bar
+          // Voice note recording bar OR text input bar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             color: _theme.appBarColor,
             child: SafeArea(
               top: false,
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: Icon(
-                      _showEmojiPicker
-                          ? Icons.keyboard
-                          : Icons.emoji_emotions_outlined,
-                      color: _theme.accentColor,
-                    ),
-                    onPressed: () {
-                      setState(() {
-                        _showEmojiPicker = !_showEmojiPicker;
-                      });
-                    },
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.add_photo_alternate_outlined,
-                      color: _theme.accentColor,
-                    ),
-                    onPressed: _showImageOptions,
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _messageController,
-                      onChanged: _onInputChanged,
-                      decoration: InputDecoration(
-                        hintText: _disappearingSeconds == null
-                            ? 'Type a secret message...'
-                            : 'Disappearing message (${_disappearingSeconds}s)...',
-                        hintStyle: TextStyle(color: Colors.grey[500]),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(24),
-                          borderSide: BorderSide.none,
+              child: _isRecordingVoice
+                  ? Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        const Icon(
+                          Icons.fiber_manual_record,
+                          color: Colors.redAccent,
+                          size: 18,
                         ),
-                        filled: true,
-                        fillColor: _theme.backgroundColor,
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18,
-                          vertical: 10,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Recording voice note... ${_recordingSeconds}s',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
                         ),
-                      ),
-                      style: const TextStyle(color: Colors.white),
-                      onSubmitted: (text) => _sendMessage(text: text),
+                        TextButton.icon(
+                          onPressed: _cancelVoiceRecording,
+                          icon: const Icon(
+                            Icons.delete_outline,
+                            color: Colors.redAccent,
+                          ),
+                          label: const Text(
+                            'Cancel',
+                            style: TextStyle(color: Colors.redAccent),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        ElevatedButton.icon(
+                          onPressed: _finishAndSendVoiceRecording,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: const Text('Send'),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            _showEmojiPicker
+                                ? Icons.keyboard
+                                : Icons.emoji_emotions_outlined,
+                            color: _theme.accentColor,
+                          ),
+                          onPressed: () {
+                            setState(() {
+                              _showEmojiPicker = !_showEmojiPicker;
+                            });
+                          },
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.add_photo_alternate_outlined,
+                            color: _theme.accentColor,
+                          ),
+                          onPressed: _showImageOptions,
+                        ),
+                        Expanded(
+                          child: TextField(
+                            controller: _messageController,
+                            onChanged: _onInputChanged,
+                            decoration: InputDecoration(
+                              hintText: _disappearingSeconds == null
+                                  ? 'Type a secret message...'
+                                  : 'Disappearing message (${_disappearingSeconds}s)...',
+                              hintStyle: TextStyle(color: Colors.grey[500]),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(24),
+                                borderSide: BorderSide.none,
+                              ),
+                              filled: true,
+                              fillColor: _theme.backgroundColor,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 18,
+                                vertical: 10,
+                              ),
+                            ),
+                            style: const TextStyle(color: Colors.white),
+                            onSubmitted: (text) => _sendMessage(text: text),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: _theme.myBubbleGradient,
+                            ),
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            tooltip: hasTypedText
+                                ? 'Send Message'
+                                : 'Record Voice Note',
+                            icon: Icon(
+                              hasTypedText ? Icons.send_rounded : Icons.mic,
+                              color: Colors.white,
+                            ),
+                            onPressed: hasTypedText
+                                ? () => _sendMessage(
+                                    text: _messageController.text,
+                                  )
+                                : _startVoiceRecording,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(colors: _theme.myBubbleGradient),
-                      shape: BoxShape.circle,
-                    ),
-                    child: IconButton(
-                      icon: const Icon(Icons.send_rounded, color: Colors.white),
-                      onPressed: () =>
-                          _sendMessage(text: _messageController.text),
-                    ),
-                  ),
-                ],
-              ),
             ),
           ),
         ],
@@ -1426,6 +1732,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildMessageBubble(ChatMessage message) {
     final uniqueReactions = message.reactions.values.toSet().toList();
+    final isPlayingVoice = _playingMessageId == message.id;
 
     return GestureDetector(
       onLongPress: () => _showMessageActions(message),
@@ -1546,7 +1853,47 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                  if (message.text != null && message.text!.isNotEmpty)
+                  if (message.encryptedAudioData != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: () => _togglePlayVoiceNote(message),
+                            child: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: Colors.white24,
+                              child: Icon(
+                                isPlayingVoice ? Icons.stop : Icons.play_arrow,
+                                color: Colors.white,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            isPlayingVoice
+                                ? 'Playing encrypted audio...'
+                                : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (message.text != null && message.text!.isNotEmpty)
                     Text(
                       message.text!,
                       style: const TextStyle(
@@ -1622,6 +1969,8 @@ class ChatMessage {
   final String id;
   final String? text;
   final String? imageUrl;
+  final String? encryptedAudioData;
+  final int? audioDurationSeconds;
   final bool isMe;
   final bool isSeen;
   final DateTime timestamp;
@@ -1634,6 +1983,8 @@ class ChatMessage {
     required this.id,
     this.text,
     this.imageUrl,
+    this.encryptedAudioData,
+    this.audioDurationSeconds,
     required this.isMe,
     this.isSeen = false,
     required this.timestamp,

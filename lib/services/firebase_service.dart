@@ -17,6 +17,7 @@ class FirebaseService {
   /// Unambiguous 6-character code alphabet (excludes 0, O, 1, I).
   static const String codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   static const int roomCodeLength = 6;
+  static const String defaultPasscode = '1997';
 
   /// Explicit Realtime Database URL (required because the database resides in
   /// `asia-southeast1` and `google-services.json` may omit `firebase_url`).
@@ -25,12 +26,15 @@ class FirebaseService {
 
   static final Random _random = Random.secure();
   static final RegExp _validCodePattern = RegExp(r'^[A-Z0-9]{6}$');
+  static final RegExp _validPasscodePattern = RegExp(r'^[0-9]{4,8}$');
 
   String _peerId;
   DatabaseReference? _chatRef;
   String? _roomId;
   bool _isPaired = false;
   bool _isOnline = true;
+  String _customPasscode = defaultPasscode;
+  bool _biometricEnabled = false;
   final EncryptionService _encryption = EncryptionService();
 
   /// Unique per-install/session peer identifier used as `senderId` and status key.
@@ -41,6 +45,12 @@ class FirebaseService {
 
   /// Whether this device has an active paired chat room.
   bool get isPaired => _isPaired && _roomId != null;
+
+  /// Current custom secret calculator passcode (4–8 digits).
+  String get customPasscode => _customPasscode;
+
+  /// Whether fingerprint/biometric verification is required after entering the passcode.
+  bool get biometricEnabled => _biometricEnabled;
 
   FirebaseDatabase get _db => FirebaseDatabase.instanceFor(
     app: Firebase.app(),
@@ -70,6 +80,11 @@ class FirebaseService {
     return _validCodePattern.hasMatch(normalized);
   }
 
+  /// Returns true when [passcode] is 4–8 numeric digits.
+  static bool isValidPasscode(String passcode) {
+    return _validPasscodePattern.hasMatch(passcode.trim());
+  }
+
   Future<void> initialize() async {
     await Firebase.initializeApp();
     await loadSavedState();
@@ -84,7 +99,7 @@ class FirebaseService {
     return File('${Directory.systemTemp.path}/secret_calc_state.json');
   }
 
-  /// Loads persisted `peerId` and `pairedRoomId` from local storage if present.
+  /// Loads persisted `peerId`, `pairedRoomId`, `customPasscode`, and `biometricEnabled`.
   Future<void> loadSavedState() async {
     try {
       final file = _stateFile();
@@ -97,6 +112,14 @@ class FirebaseService {
         final savedPeer = decoded['peerId'];
         if (savedPeer is String && savedPeer.length == 16) {
           _peerId = savedPeer;
+        }
+        final savedPasscode = decoded['customPasscode'];
+        if (savedPasscode is String && isValidPasscode(savedPasscode)) {
+          _customPasscode = savedPasscode.trim();
+        }
+        final savedBio = decoded['biometricEnabled'];
+        if (savedBio is bool) {
+          _biometricEnabled = savedBio;
         }
         final savedRoom = decoded['roomId'];
         if (savedRoom is String &&
@@ -122,11 +145,31 @@ class FirebaseService {
     try {
       final file = _stateFile();
       await file.writeAsString(
-        jsonEncode({'peerId': _peerId, 'roomId': _isPaired ? _roomId : null}),
+        jsonEncode({
+          'peerId': _peerId,
+          'roomId': _isPaired ? _roomId : null,
+          'customPasscode': _customPasscode,
+          'biometricEnabled': _biometricEnabled,
+        }),
       );
     } catch (_) {
       // Ignore write failures in read-only or test environments.
     }
+  }
+
+  /// Updates and persists a custom calculator passcode (4–8 digits).
+  Future<bool> setCustomPasscode(String code) async {
+    final trimmed = code.trim();
+    if (!isValidPasscode(trimmed)) return false;
+    _customPasscode = trimmed;
+    await _saveState();
+    return true;
+  }
+
+  /// Updates and persists the biometric lock setting.
+  Future<void> setBiometricEnabled(bool enabled) async {
+    _biometricEnabled = enabled;
+    await _saveState();
   }
 
   /// Marks the currently created room as paired and persists it.
@@ -211,10 +254,12 @@ class FirebaseService {
     return _db.ref().child('rooms').child(_roomId!).child('members').onValue;
   }
 
-  // Send a message with optional reply quote and disappearing timer.
+  // Send a message with optional image, voice note, reply quote, and disappearing timer.
   Future<void> sendMessage(
     String text, {
     String? imageUrl,
+    String? audioBase64,
+    int? audioDurationSeconds,
     String? replyToText,
     String? replyToSenderId,
     int? expiresInSeconds,
@@ -223,6 +268,9 @@ class FirebaseService {
     if (chatRef == null) return;
 
     final encryptedText = text.isNotEmpty ? _encryption.encrypt(text) : null;
+    final encryptedAudio = (audioBase64 != null && audioBase64.isNotEmpty)
+        ? _encryption.encrypt(audioBase64)
+        : null;
     final encryptedReply = (replyToText != null && replyToText.isNotEmpty)
         ? _encryption.encrypt(replyToText)
         : null;
@@ -238,10 +286,63 @@ class FirebaseService {
       'timestamp': ServerValue.timestamp,
       'senderId': _peerId,
       'seen': false,
+      'audioData': ?encryptedAudio,
+      'audioDuration': ?audioDurationSeconds,
       'replyToText': ?encryptedReply,
       'replyToSenderId': ?replyToSenderId,
       'expiresAt': ?expiresAt,
     });
+  }
+
+  /// Starts a real-time voice or video call in the current room.
+  Future<void> startCall({required bool isVideo}) async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
+    await _db.ref().child('rooms').child(_roomId!).child('call').set({
+      'callerId': _peerId,
+      'type': isVideo ? 'video' : 'voice',
+      'status': 'ringing',
+      'startedAt': ServerValue.timestamp,
+    });
+  }
+
+  /// Accepts an incoming call in the current room.
+  Future<void> acceptCall() async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
+    await _db.ref().child('rooms').child(_roomId!).child('call').update({
+      'status': 'connected',
+      'connectedAt': ServerValue.timestamp,
+    });
+  }
+
+  /// Ends or declines the active call in the current room.
+  Future<void> endCall() async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
+    await _db.ref().child('rooms').child(_roomId!).child('call').remove();
+  }
+
+  /// Sends an encrypted live audio chunk during an active call.
+  Future<void> sendCallAudioChunk(String base64Audio) async {
+    if (_roomId == null || Firebase.apps.isEmpty || base64Audio.isEmpty) return;
+    final encrypted = _encryption.encrypt(base64Audio);
+    await _db
+        .ref()
+        .child('rooms')
+        .child(_roomId!)
+        .child('call')
+        .child('audioStream')
+        .child(_peerId)
+        .set({
+          'data': encrypted,
+          'ts': ServerValue.timestamp,
+        });
+  }
+
+  /// Listens to real-time call state and audio stream in the current room.
+  Stream<DatabaseEvent> getCallStream() {
+    if (_roomId == null || Firebase.apps.isEmpty) {
+      return const Stream.empty();
+    }
+    return _db.ref().child('rooms').child(_roomId!).child('call').onValue;
   }
 
   /// Toggles an emoji reaction by this peer on [messageKey].

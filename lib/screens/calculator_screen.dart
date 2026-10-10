@@ -1,13 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../services/firebase_service.dart';
+import '../services/native_bridge_service.dart';
 import 'chat_screen.dart';
 import 'pairing_screen.dart';
 
-/// Pure calculator state machine with secret-code detection.
+/// Pure calculator state machine with default (`1997`) and custom secret-code detection.
 class CalculatorEngine {
   static const String secretCode = '1997';
+  static const int _maxBufferLength = 8;
 
+  CalculatorEngine({String? customCode})
+    : _customCode = (customCode != null && customCode.length >= 4)
+          ? customCode
+          : secretCode;
+
+  String _customCode;
   String _output = '0';
   String _currentInput = '';
   String _operand = '';
@@ -17,17 +25,26 @@ class CalculatorEngine {
   String _secretBuffer = '';
 
   String get output => _output;
+  String get customCode => _customCode;
+
+  set customCode(String code) {
+    final trimmed = code.trim();
+    if (trimmed.length >= 4 && trimmed.length <= _maxBufferLength) {
+      _customCode = trimmed;
+    }
+  }
 
   /// Processes a calculator button [value].
-  /// Returns `true` when the secret code (`1997`) has just been entered.
+  /// Returns `true` when either the custom passcode or the master code (`1997`) is entered.
   bool press(String value) {
     _secretBuffer += value;
-    if (_secretBuffer.length > secretCode.length) {
+    if (_secretBuffer.length > _maxBufferLength) {
       _secretBuffer = _secretBuffer.substring(
-        _secretBuffer.length - secretCode.length,
+        _secretBuffer.length - _maxBufferLength,
       );
     }
-    if (_secretBuffer == secretCode) {
+    if (_secretBuffer.endsWith(_customCode) ||
+        _secretBuffer.endsWith(secretCode)) {
       _secretBuffer = '';
       return true;
     }
@@ -164,19 +181,27 @@ class CalculatorScreen extends StatefulWidget {
 
 class _CalculatorScreenState extends State<CalculatorScreen> {
   final CalculatorEngine _engine = CalculatorEngine();
+  final FirebaseService _firebase = FirebaseService();
+  final NativeBridgeService _native = NativeBridgeService();
 
-  void _onButtonPressed(String value) {
+  Future<void> _onButtonPressed(String value) async {
+    _engine.customCode = _firebase.customPasscode;
     var shouldNavigate = false;
     setState(() {
       shouldNavigate = _engine.press(value);
     });
     if (shouldNavigate) {
-      _navigateToChat();
+      await _navigateToChat();
     }
   }
 
-  void _navigateToChat() {
-    final destination = FirebaseService().isPaired
+  Future<void> _navigateToChat() async {
+    if (_firebase.biometricEnabled) {
+      final verified = await _native.authenticateDevice();
+      if (!verified || !mounted) return;
+    }
+    if (!mounted) return;
+    final destination = _firebase.isPaired
         ? const ChatScreen()
         : const PairingScreen();
     Navigator.push(

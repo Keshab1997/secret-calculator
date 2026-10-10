@@ -82,6 +82,14 @@ void main() {
       // Buffer resets after triggering
       expect(engine.press('7'), isFalse);
     });
+
+    test('detects custom secret passcode', () {
+      engine.customCode = '2580';
+      expect(engine.press('2'), isFalse);
+      expect(engine.press('5'), isFalse);
+      expect(engine.press('8'), isFalse);
+      expect(engine.press('0'), isTrue);
+    });
   });
 
   group('CalculatorApp widget tests', () {
