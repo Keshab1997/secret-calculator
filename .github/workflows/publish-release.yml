@@ -49,4 +49,9 @@ jobs:
       # reused.
       play-whats-new-directory: ${{ inputs.upload_to_play_internal && 'distribution/whatsnew' || '' }}
       play-status: completed
+      # The Google config now comes from the GOOGLE_SERVICES_JSON_BASE64 secret
+      # (via `secrets: inherit` below) instead of the tracked file. Preflight is
+      # already on for the release path; this makes an empty/missing secret fail
+      # loudly instead of shipping a silently offline release.
+      preflight-require-firebase: true
     secrets: inherit

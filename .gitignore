@@ -46,3 +46,13 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Secrets and environment - never commit these (see AGENTS.md).
+# The Firebase client config is injected in CI from the
+# GOOGLE_SERVICES_JSON_BASE64 repository secret instead.
+google-services.json
+GoogleService-Info.plist
+key.properties
+*.jks
+*.keystore
+.env

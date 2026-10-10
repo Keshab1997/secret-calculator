@@ -30,5 +30,9 @@ jobs:
       KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
       KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
       KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      # Firebase client config. Must be forwarded to the builder, otherwise the
+      # google-services Gradle plugin fails because android/app/google-services.json
+      # is no longer tracked in git.
+      GOOGLE_SERVICES_JSON_BASE64: ${{ secrets.GOOGLE_SERVICES_JSON_BASE64 }}
       # Optional for apps using ImgBB; extractable from the built APK/AAB.
       IMGBB_API_KEY: ${{ secrets.IMGBB_API_KEY }}
