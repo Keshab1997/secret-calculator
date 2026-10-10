@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
 
 import 'encryption_service.dart';
 
@@ -9,6 +10,8 @@ class NativeBridgeService {
   static final NativeBridgeService _instance = NativeBridgeService._internal();
   factory NativeBridgeService() => _instance;
   NativeBridgeService._internal();
+
+  final LocalAuthentication _localAuth = LocalAuthentication();
 
   static const MethodChannel _channel = MethodChannel(
     'com.keshabstudios.calculator/native',
@@ -97,13 +100,26 @@ class NativeBridgeService {
     }
   }
 
+  /// Asks the system to verify the user's identity (fingerprint, face, or
+  /// device credential) via the biometric prompt.
+  ///
+  /// Contract kept from the old Keyguard implementation: a device with no
+  /// lock enrolled and environments without the plugin (widget tests,
+  /// desktop) count as verified; a cancelled or failed prompt denies access.
   Future<bool> authenticateDevice() async {
     try {
-      final verified = await _channel.invokeMethod<bool>('authenticateDevice');
-      return verified ?? false;
+      final supported = await _localAuth.isDeviceSupported();
+      if (!supported) return true;
+      return await _localAuth.authenticate(
+        localizedReason: 'Verify your identity to open Secret Chat',
+        biometricOnly: false,
+        persistAcrossBackgrounding: true,
+      );
     } on MissingPluginException {
       return true;
     } on PlatformException {
+      return false;
+    } on LocalAuthException {
       return false;
     }
   }

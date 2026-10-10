@@ -1,30 +1,25 @@
 package com.keshabstudios.calculator
 
 import android.Manifest
-import android.app.Activity
-import android.app.KeyguardManager
 import android.content.Context
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val channelName = "com.keshabstudios.calculator/native"
     private val requestRecordAudioCode = 7001
-    private val requestAuthCode = 7002
 
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
     private var currentRecordingPath: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
-    private var pendingAuthResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -54,7 +49,6 @@ class MainActivity : FlutterActivity() {
                         audioManager.isSpeakerphoneOn = enabled
                         result.success(true)
                     }
-                    "authenticateDevice" -> authenticateDevice(result)
                     else -> result.notImplemented()
                 }
             }
@@ -166,31 +160,6 @@ class MainActivity : FlutterActivity() {
         mediaPlayer = null
     }
 
-    private fun authenticateDevice(result: MethodChannel.Result) {
-        try {
-            val keyguard = getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager
-            if (!keyguard.isKeyguardSecure) {
-                // Device has no screen lock configured; allow access
-                result.success(true)
-                return
-            }
-            @Suppress("DEPRECATION")
-            val intent: Intent? = keyguard.createConfirmDeviceCredentialIntent(
-                "Calculator Security",
-                "Verify your fingerprint or screen lock to open Secret Chat"
-            )
-            if (intent == null) {
-                result.success(true)
-                return
-            }
-            pendingAuthResult = result
-            @Suppress("DEPRECATION")
-            startActivityForResult(intent, requestAuthCode)
-        } catch (e: Exception) {
-            result.success(true)
-        }
-    }
-
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -202,15 +171,6 @@ class MainActivity : FlutterActivity() {
                 grantResults[0] == PackageManager.PERMISSION_GRANTED
             pendingPermissionResult?.success(granted)
             pendingPermissionResult = null
-        }
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == requestAuthCode) {
-            pendingAuthResult?.success(resultCode == Activity.RESULT_OK)
-            pendingAuthResult = null
         }
     }
 
