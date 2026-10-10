@@ -1,4 +1,4 @@
-package com.keshab.secret_calculator
+package com.keshabstudios.calculator
 
 import io.flutter.embedding.android.FlutterActivity
 
