@@ -88,8 +88,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _listenForMessages() {
     _firebase.getMessagesStream().listen((event) {
-      if (event.snapshot.value != null) {
-        final data = event.snapshot.value as Map<dynamic, dynamic>;
+      if (event.snapshot?.value != null) {
+        final data = event.snapshot!.value as Map<dynamic, dynamic>;
         data.forEach((key, value) {
           final message = value as Map<dynamic, dynamic>;
           final decryptedText = message['text'] != null
@@ -122,8 +122,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _listenForPartnerStatus() {
     _firebase.getPartnerStatusStream().listen((event) {
-      if (event.snapshot.value != null) {
-        final data = event.snapshot.value as Map<dynamic, dynamic>;
+      if (event.snapshot?.value != null) {
+        final data = event.snapshot!.value as Map<dynamic, dynamic>;
         setState(() {
           _isPartnerOnline = data['isOnline'] ?? false;
           if (data['lastSeen'] != null) {

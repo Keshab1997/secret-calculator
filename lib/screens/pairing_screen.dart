@@ -26,7 +26,7 @@ class _PairingScreenState extends State<PairingScreen> {
   Future<void> _generateCode() async {
     setState(() => _isLoading = true);
     try {
-      final roomCode = await _firebase.createRoom();
+      await _firebase.createRoom();
       setState(() {
         _myCode = _firebase.getShortCode();
         _isLoading = false;
