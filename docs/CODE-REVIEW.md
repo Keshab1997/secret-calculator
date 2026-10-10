@@ -35,7 +35,7 @@ opening `rooms/<code>` directly in the Firebase Console to inspect what is writt
 | P0-4 | Both peers write to the same `status` node (online/last seen is wrong) | High | `firebase_service.dart:90-117` |
 | P1-1 | "Encryption" is a hardcoded key + fixed IV, AES-128 not AES-256 | High (security) | `encryption_service.dart` |
 | P1-2 | No Firebase Realtime Database / Storage security rules | High (security) | repo root |
-| P1-3 | `google-services.json` committed to a public repo | High (security) | `android/app/google-services.json` |
+| P1-3 | ~~`google-services.json` committed to a public repo~~ ✅ fixed in `26d6f21` | High (security) | `android/app/google-services.json` |
 | P2-1 | Almost no tests (1 smoke test) though CI runs tests | Medium | `test/` |
 | P2-2 | 5 analyzer warnings | Low | `chat_screen.dart` |
 | P2-3 | Message/status `StreamSubscription`s never cancelled | Medium | `chat_screen.dart:64-78` |
@@ -340,22 +340,32 @@ non-existent top-level path and confirm it is denied.
 
 ---
 
-## P1-3 — `google-services.json` is committed to a public repo
+## P1-3 — `google-services.json` committed to a public repo — ✅ fixed in `26d6f21`
 
-`android/app/google-services.json` is tracked (`git ls-files` lists it) and there is no
-`.gitignore` entry for it, even though `AGENTS.md` says it must never be committed. It
-contains the project id, API key and app id. It is public in
+`android/app/google-services.json` was tracked (`git ls-files` listed it) and there was
+no `.gitignore` entry for it, even though `AGENTS.md` says it must never be committed.
+It contains the project id, API key and app id, so it was public in
 `github.com/Keshab1997/secret-calculator`.
 
-**Fix:**
+**Fixed:** the file is untracked (`git rm --cached`) and ignored; CI now writes it from
+the `GOOGLE_SERVICES_JSON_BASE64` repository secret before the build
+(`manual-build.yml` forwards the secret, `publish-release.yml` inherits it and sets
+`preflight-require-firebase: true`). `flutter-builder`'s `doctor.sh` now reports
+`google-services.json … not tracked by git` and
+`GOOGLE_SERVICES_JSON_BASE64 forwarded by every build workflow`.
+
+To re-set the secret after changing the Firebase project:
+
 ```bash
-git rm --cached android/app/google-services.json
-printf '%s\n' 'android/app/google-services.json' >> .gitignore
-git commit -m "chore: stop tracking google-services.json"
+openssl base64 -A -in android/app/google-services.json \
+  | gh secret set GOOGLE_SERVICES_JSON_BASE64 --repo Keshab1997/secret-calculator
 ```
-The local file stays, so builds still work. Because it is already in history, **also
-rotate/restrict the API key in the Firebase Console** (Google Cloud Console → APIs &
-Services → Credentials → restrict the key to the Android app + Firebase APIs).
+
+**Still outstanding:** the file remains in git **history**, so the old API key is still
+readable there. **Rotate/restrict the API key in the Firebase Console** (Google Cloud
+Console → APIs & Services → Credentials → restrict the key to the Android app +
+Firebase APIs). Purging history would need a `git filter-repo` rewrite and a force
+push, which is not worth it once the key is rotated.
 
 ---
 
