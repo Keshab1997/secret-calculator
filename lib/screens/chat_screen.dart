@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_database.dart';
+
 import 'dart:io';
+
 import '../services/firebase_service.dart';
 import '../services/encryption_service.dart';
 import '../services/notification_service.dart';
@@ -25,10 +27,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String _partnerLastSeen = '';
 
   final List<String> _emojis = [
-    '😀', '😂', '😍', '🥰', '😘', '😊', '😉', '😎',
-    '🤩', '🥳', '😋', '🤪', '😜', '🤗', '❤️', '💕',
-    '💖', '💗', '💝', '🔥', '✨', '🌟', '💫', '🎉',
-    '🎊', '👏', '🙌', '💪', '👍', '👎', '🤝', '🙏',
+    '😀',
+    '😂',
+    '😍',
+    '🥰',
+    '😘',
+    '😊',
+    '😉',
+    '😎',
+    '🤩',
+    '🥳',
+    '😋',
+    '🤪',
+    '😜',
+    '🤗',
+    '❤️',
+    '💕',
+    '💖',
+    '💗',
+    '💝',
+    '🔥',
+    '✨',
+    '🌟',
+    '💫',
+    '🎉',
+    '🎊',
+    '👏',
+    '🙌',
+    '💪',
+    '👍',
+    '👎',
+    '🤝',
+    '🙏',
   ];
 
   @override
@@ -62,17 +92,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final data = event.snapshot.value as Map<dynamic, dynamic>;
         data.forEach((key, value) {
           final message = value as Map<dynamic, dynamic>;
-          final decryptedText = message['text'] != null 
-              ? _encryption.decrypt(message['text']) 
+          final decryptedText = message['text'] != null
+              ? _encryption.decrypt(message['text'])
               : null;
-          
+
           setState(() {
-            _messages.add(ChatMessage(
-              text: decryptedText,
-              imageUrl: message['imageUrl'],
-              isMe: message['senderId'] == _firebase.getShortCode().toLowerCase(),
-              timestamp: DateTime.fromMillisecondsSinceEpoch(message['timestamp'] ?? 0),
-            ));
+            _messages.add(
+              ChatMessage(
+                text: decryptedText,
+                imageUrl: message['imageUrl'],
+                isMe:
+                    message['senderId'] ==
+                    _firebase.getShortCode().toLowerCase(),
+                timestamp: DateTime.fromMillisecondsSinceEpoch(
+                  message['timestamp'] ?? 0,
+                ),
+              ),
+            );
           });
 
           // Show fake notification for new messages
@@ -91,8 +127,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _isPartnerOnline = data['isOnline'] ?? false;
           if (data['lastSeen'] != null) {
-            final lastSeen = DateTime.fromMillisecondsSinceEpoch(data['lastSeen']);
-            _partnerLastSeen = '${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
+            final lastSeen = DateTime.fromMillisecondsSinceEpoch(
+              data['lastSeen'],
+            );
+            _partnerLastSeen =
+                '${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
           }
         });
       }
@@ -166,7 +205,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onTap: () {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Voice call feature coming soon!')),
+                  const SnackBar(
+                    content: Text('Voice call feature coming soon!'),
+                  ),
                 );
               },
             ),
@@ -176,7 +217,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onTap: () {
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Video call feature coming soon!')),
+                  const SnackBar(
+                    content: Text('Video call feature coming soon!'),
+                  ),
                 );
               },
             ),
@@ -215,14 +258,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         backgroundColor: Colors.deepPurple,
         foregroundColor: Colors.white,
         actions: [
-          IconButton(
-            icon: const Icon(Icons.call),
-            onPressed: _showCallOptions,
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () {},
-          ),
+          IconButton(icon: const Icon(Icons.call), onPressed: _showCallOptions),
+          IconButton(icon: const Icon(Icons.more_vert), onPressed: () {}),
         ],
       ),
       body: Column(
@@ -234,7 +271,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.lock_outline, size: 64, color: Colors.grey[400]),
+                        Icon(
+                          Icons.lock_outline,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
                         const SizedBox(height: 16),
                         Text(
                           'Start a secret conversation',
@@ -332,7 +373,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   backgroundColor: Colors.deepPurple,
                   child: IconButton(
                     icon: const Icon(Icons.send, color: Colors.white),
-                    onPressed: () => _sendMessage(text: _messageController.text),
+                    onPressed: () =>
+                        _sendMessage(text: _messageController.text),
                   ),
                 ),
               ],
@@ -377,7 +419,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: CircularProgressIndicator(
                           value: loadingProgress.expectedTotalBytes != null
                               ? loadingProgress.cumulativeBytesLoaded /
-                                  loadingProgress.expectedTotalBytes!
+                                    loadingProgress.expectedTotalBytes!
                               : null,
                         ),
                       ),
@@ -393,10 +435,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             const SizedBox(height: 4),
             Text(
               '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
-              style: TextStyle(
-                color: Colors.grey[400],
-                fontSize: 10,
-              ),
+              style: TextStyle(color: Colors.grey[400], fontSize: 10),
             ),
           ],
         ),

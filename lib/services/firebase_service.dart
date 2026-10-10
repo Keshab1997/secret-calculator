@@ -1,7 +1,9 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database.dart';
 import 'package:firebase_storage.dart';
+
 import 'dart:io';
+
 import 'encryption_service.dart';
 
 class FirebaseService {
@@ -21,30 +23,30 @@ class FirebaseService {
   Future<String> createRoom() async {
     final roomRef = FirebaseDatabase.instance.ref().child('rooms').push();
     _roomId = roomRef.key;
-    
-    await roomRef.set({
-      'createdAt': ServerValue.timestamp,
-      'members': [],
-    });
-    
+
+    await roomRef.set({'createdAt': ServerValue.timestamp, 'members': []});
+
     _chatRef = roomRef.child('messages');
     return _roomId!;
   }
 
   // Join a room with code
   Future<bool> joinRoom(String roomCode) async {
-    final roomRef = FirebaseDatabase.instance.ref().child('rooms').child(roomCode);
+    final roomRef = FirebaseDatabase.instance
+        .ref()
+        .child('rooms')
+        .child(roomCode);
     final snapshot = await roomRef.get();
-    
+
     if (snapshot.exists) {
       _roomId = roomCode;
       _chatRef = roomRef.child('messages');
-      
+
       // Add user to members
       await roomRef.child('members').push().set({
         'joinedAt': ServerValue.timestamp,
       });
-      
+
       return true;
     }
     return false;
@@ -53,10 +55,10 @@ class FirebaseService {
   // Send a message
   Future<void> sendMessage(String text, {String? imageUrl}) async {
     if (_chatRef == null) return;
-    
+
     // Encrypt the message
     final encryptedText = _encryption.encrypt(text);
-    
+
     await _chatRef!.push().set({
       'text': encryptedText,
       'imageUrl': imageUrl,
@@ -88,13 +90,13 @@ class FirebaseService {
   // Update online status
   Future<void> updateOnlineStatus(bool isOnline) async {
     if (_roomId == null) return;
-    
+
     final statusRef = FirebaseDatabase.instance
         .ref()
         .child('rooms')
         .child(_roomId!)
         .child('status');
-    
+
     await statusRef.set({
       'isOnline': isOnline,
       'lastSeen': ServerValue.timestamp,

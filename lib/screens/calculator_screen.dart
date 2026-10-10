@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'pairing_screen.dart';
 
 class CalculatorScreen extends StatefulWidget {
@@ -101,9 +102,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         break;
     }
 
-    _output = result == result.roundToDouble() 
-        ? result.round().toString() 
-        : result.toStringAsFixed(8).replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+    _output = result == result.roundToDouble()
+        ? result.round().toString()
+        : result
+              .toStringAsFixed(8)
+              .replaceAll(RegExp(r'0+$'), '')
+              .replaceAll(RegExp(r'\.$'), '');
     _currentInput = _output;
     _operand = '';
     _shouldResetInput = true;
@@ -113,7 +117,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     if (_currentInput.isNotEmpty) {
       double value = double.parse(_currentInput);
       value = value / 100;
-      _output = value.toStringAsFixed(8).replaceAll(RegExp(r'0+$'), '').replaceAll(RegExp(r'\.$'), '');
+      _output = value
+          .toStringAsFixed(8)
+          .replaceAll(RegExp(r'0+$'), '')
+          .replaceAll(RegExp(r'\.$'), '');
       _currentInput = _output;
     }
   }
@@ -149,7 +156,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     );
   }
 
-  Widget _buildButton(String text, {Color? color, Color? textColor, int flex = 1}) {
+  Widget _buildButton(
+    String text, {
+    Color? color,
+    Color? textColor,
+    int flex = 1,
+  }) {
     return Expanded(
       flex: flex,
       child: Padding(

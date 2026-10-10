@@ -5,7 +5,8 @@ class NotificationService {
   factory NotificationService() => _instance;
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _notifications =
+      FlutterLocalNotificationsPlugin();
 
   // Fake notification messages that look like calculator notifications
   static const List<String> _fakeMessages = [
@@ -22,13 +23,15 @@ class NotificationService {
   ];
 
   Future<void> initialize() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
-    
+
     const initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
@@ -38,8 +41,10 @@ class NotificationService {
   }
 
   Future<void> showFakeNotification({String? customMessage}) async {
-    final message = customMessage ?? _fakeMessages[DateTime.now().millisecond % _fakeMessages.length];
-    
+    final message =
+        customMessage ??
+        _fakeMessages[DateTime.now().millisecond % _fakeMessages.length];
+
     const androidDetails = AndroidNotificationDetails(
       'calculator_channel',
       'Calculator',
@@ -49,13 +54,13 @@ class NotificationService {
       showWhen: false,
       icon: '@mipmap/ic_launcher',
     );
-    
+
     const iosDetails = DarwinNotificationDetails(
       presentAlert: false,
       presentBadge: false,
       presentSound: false,
     );
-    
+
     const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,

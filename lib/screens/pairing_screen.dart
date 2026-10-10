@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../services/firebase_service.dart';
 import 'chat_screen.dart';
 
@@ -93,18 +94,28 @@ class _PairingScreenState extends State<PairingScreen> {
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
                   children: [
-                    const Icon(Icons.phone_android, size: 48, color: Colors.deepPurple),
+                    const Icon(
+                      Icons.phone_android,
+                      size: 48,
+                      color: Colors.deepPurple,
+                    ),
                     const SizedBox(height: 16),
                     const Text(
                       'Your Pair Code',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     if (_isLoading)
                       const CircularProgressIndicator()
                     else if (_myCode != null)
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 32,
+                          vertical: 16,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.grey[900],
                           borderRadius: BorderRadius.circular(12),
@@ -128,9 +139,9 @@ class _PairingScreenState extends State<PairingScreen> {
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Divider
             Row(
               children: [
@@ -142,9 +153,9 @@ class _PairingScreenState extends State<PairingScreen> {
                 Expanded(child: Divider(color: Colors.grey[600])),
               ],
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Join Section
             Card(
               elevation: 4,
@@ -156,7 +167,10 @@ class _PairingScreenState extends State<PairingScreen> {
                     const SizedBox(height: 16),
                     const Text(
                       'Join Partner',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 16),
                     TextField(
@@ -193,21 +207,23 @@ class _PairingScreenState extends State<PairingScreen> {
                           ),
                         ),
                         child: _isLoading
-                            ? const CircularProgressIndicator(color: Colors.white)
-                            : const Text('JOIN', style: TextStyle(fontSize: 18)),
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text(
+                                'JOIN',
+                                style: TextStyle(fontSize: 18),
+                              ),
                       ),
                     ),
                   ],
                 ),
               ),
             ),
-            
+
             if (_error != null) ...[
               const SizedBox(height: 16),
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.red),
-              ),
+              Text(_error!, style: const TextStyle(color: Colors.red)),
             ],
           ],
         ),
