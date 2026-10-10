@@ -28,6 +28,10 @@
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Secret Chat uses Face ID to verify it is you before opening your chats.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Secret Chat uses the microphone for voice notes and peer-to-peer calls.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Secret Chat uses the camera for peer-to-peer video calls.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

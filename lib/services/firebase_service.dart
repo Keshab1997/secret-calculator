@@ -320,19 +320,41 @@ class FirebaseService {
     await _db.ref().child('rooms').child(_roomId!).child('call').remove();
   }
 
-  /// Sends an encrypted live audio chunk during an active call.
-  Future<void> sendCallAudioChunk(String base64Audio) async {
-    if (_roomId == null || Firebase.apps.isEmpty || base64Audio.isEmpty) return;
-    final encrypted = _encryption.encrypt(base64Audio);
+  /// Writes this peer's SDP (offer or answer) under `call/signal/{peerId}`.
+  ///
+  /// Callers must write this AFTER [startCall]: startCall replaces the whole
+  /// `call` node and would wipe an earlier signal.
+  Future<void> writeCallSignal(String type, String sdp) async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
     await _db
         .ref()
         .child('rooms')
         .child(_roomId!)
         .child('call')
-        .child('audioStream')
+        .child('signal')
         .child(_peerId)
+        .set({'type': type, 'sdp': sdp, 'ts': ServerValue.timestamp});
+  }
+
+  /// Appends one ICE candidate under `call/ice/{peerId}/{pushId}`.
+  Future<void> writeCallIceCandidate(
+    String candidate,
+    String? sdpMid,
+    int? sdpMLineIndex,
+  ) async {
+    if (_roomId == null || Firebase.apps.isEmpty || candidate.isEmpty) return;
+    await _db
+        .ref()
+        .child('rooms')
+        .child(_roomId!)
+        .child('call')
+        .child('ice')
+        .child(_peerId)
+        .push()
         .set({
-          'data': encrypted,
+          'candidate': candidate,
+          'sdpMid': sdpMid,
+          'sdpMLineIndex': sdpMLineIndex,
           'ts': ServerValue.timestamp,
         });
   }
