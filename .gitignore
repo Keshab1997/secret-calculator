@@ -56,3 +56,6 @@ key.properties
 *.jks
 *.keystore
 .env
+
+# Agent pack artifacts (tool/see_screen.py output) - never commit screenshots
+.agent-screens/
