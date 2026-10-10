@@ -114,6 +114,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool _isRecordingVoice = false;
   int _recordingSeconds = 0;
+  bool _micHeld = false;
+  bool _micStarting = false;
+  double? _micDownX;
+  DateTime? _micDownAt;
+  bool _micCancelArmed = false;
   String? _playingMessageId;
   bool _isShowingIncomingCall = false;
 
@@ -480,6 +485,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startVoiceRecording() async {
+    try {
+      await _startVoiceRecordingInner();
+    } finally {
+      _micStarting = false;
+    }
+  }
+
+  Future<void> _startVoiceRecordingInner() async {
     final granted = await _native.ensureMicPermission();
     if (!granted) {
       if (!mounted) return;
@@ -489,15 +502,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     final path = await _native.startRecording();
-    if (path == null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not start voice recording')),
-      );
+    if (path == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start voice recording')),
+        );
+      }
+      return;
+    }
+    // The finger lifted (or the screen was disposed) while permission/start
+    // was still resolving — e.g. the first-run permission dialog. Discard
+    // instead of entering a stuck recording state with no pointer to release.
+    if (!_micHeld || !mounted) {
+      final stale = await _native.stopRecording();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hold to record a voice note')),
+        );
+      }
+      if (stale != null) {
+        try {
+          await File(stale).delete();
+        } catch (_) {}
+      }
       return;
     }
     setState(() {
       _isRecordingVoice = true;
       _recordingSeconds = 0;
+      // Close the emoji panel so a second finger can't insert text mid-hold
+      // and flip the mic slot's icon branch while the gesture is live.
+      _showEmojiPicker = false;
     });
     _recordingTimer?.cancel();
     _recordingTimer = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -506,19 +541,120 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  void _onMicPointerDown(PointerDownEvent event) {
+    if (_micHeld || _micStarting || _isRecordingVoice) return;
+    // The Listener also wraps the send button; a pointer down while text is
+    // typed belongs to the send tap, not to voice recording.
+    if (_messageController.text.trim().isNotEmpty) return;
+    _micHeld = true;
+    _micDownX = event.localPosition.dx;
+    _micDownAt = DateTime.now();
+    _micCancelArmed = false;
+    _micStarting = true;
+    _startVoiceRecording();
+  }
+
+  void _onMicPointerMove(PointerMoveEvent event) {
+    if (!_micHeld || _micDownX == null) return;
+    final armed = event.localPosition.dx < _micDownX! - 80;
+    if (armed != _micCancelArmed) {
+      setState(() => _micCancelArmed = armed);
+    }
+  }
+
+  void _onMicPointerUp(PointerUpEvent event) {
+    if (!_micHeld) return;
+    _micHeld = false;
+    final heldFor = DateTime.now().difference(_micDownAt ?? DateTime.now());
+    _micDownX = null;
+    _micDownAt = null;
+    if (!_isRecordingVoice) {
+      // Start still in flight; _startVoiceRecording will discard the file
+      // and show the hold hint once it resolves.
+      return;
+    }
+    // Recording active: the mic slot can't have flipped to the send icon
+    // mid-hold (_isRecordingVoice keeps hasTypedText out of the icon branch),
+    // so unconditionally resolve the gesture here.
+    if (_micCancelArmed) {
+      _micCancelArmed = false;
+      _cancelVoiceRecording();
+    } else if (heldFor.inMilliseconds >= 600 || _recordingSeconds >= 1) {
+      _finishAndSendVoiceRecording();
+    } else {
+      _cancelVoiceRecording();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Hold to record a voice note')),
+        );
+      }
+    }
+  }
+
+  void _onMicPointerCancel(PointerCancelEvent event) {
+    if (!_micHeld) return;
+    _micHeld = false;
+    _micDownX = null;
+    _micDownAt = null;
+    _micCancelArmed = false;
+    if (!_isRecordingVoice) {
+      return; // _startVoiceRecording will discard the stale start.
+    }
+    _cancelVoiceRecording();
+  }
+
+  Widget _buildRecordingIndicator() {
+    return Container(
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 14),
+      decoration: BoxDecoration(
+        color: _theme.backgroundColor,
+        borderRadius: BorderRadius.circular(24),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.fiber_manual_record,
+            color: Colors.redAccent,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _micCancelArmed
+                  ? 'Release to cancel'
+                  : 'Recording ${_recordingSeconds}s — release to send',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _cancelVoiceRecording() async {
     _recordingTimer?.cancel();
+    // Reset the UI before the async native/file cleanup: dart:io futures
+    // don't resolve under the test's fake-async zone, and the bar should
+    // snap back instantly on cancel anyway.
+    if (mounted) {
+      setState(() {
+        _isRecordingVoice = false;
+        _recordingSeconds = 0;
+        _micCancelArmed = false;
+      });
+    }
     final path = await _native.stopRecording();
     if (path != null) {
       try {
         await File(path).delete();
       } catch (_) {}
     }
-    if (!mounted) return;
-    setState(() {
-      _isRecordingVoice = false;
-      _recordingSeconds = 0;
-    });
   }
 
   Future<void> _finishAndSendVoiceRecording() async {
@@ -1381,7 +1517,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.shield_outlined, size: 13, color: _theme.accentColor),
+                Icon(
+                  Icons.shield_outlined,
+                  size: 13,
+                  color: _theme.accentColor,
+                ),
                 const SizedBox(width: 6),
                 Flexible(
                   child: Text(
@@ -1572,78 +1712,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ],
               ),
             ),
-          // Voice note recording bar OR text input bar
+          // Input bar: one stable Row — children never swap out mid-hold, so
+          // the mic Listener always receives the matching pointer-up/cancel.
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
             color: _theme.appBarColor,
             child: SafeArea(
               top: false,
-              child: _isRecordingVoice
-                  ? Row(
-                      children: [
-                        const SizedBox(width: 8),
-                        const Icon(
-                          Icons.fiber_manual_record,
-                          color: Colors.redAccent,
-                          size: 18,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Recording voice note... ${_recordingSeconds}s',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: _cancelVoiceRecording,
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            color: Colors.redAccent,
-                          ),
-                          label: const Text(
-                            'Cancel',
-                            style: TextStyle(color: Colors.redAccent),
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        ElevatedButton.icon(
-                          onPressed: _finishAndSendVoiceRecording,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: const Icon(Icons.send_rounded, size: 18),
-                          label: const Text('Send'),
-                        ),
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        IconButton(
-                          icon: Icon(
-                            _showEmojiPicker
-                                ? Icons.keyboard
-                                : Icons.emoji_emotions_outlined,
-                            color: _theme.accentColor,
-                          ),
-                          onPressed: () {
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: Icon(
+                      _showEmojiPicker
+                          ? Icons.keyboard
+                          : Icons.emoji_emotions_outlined,
+                      color: _theme.accentColor,
+                    ),
+                    onPressed: _isRecordingVoice
+                        ? null
+                        : () {
                             setState(() {
                               _showEmojiPicker = !_showEmojiPicker;
                             });
                           },
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.add_photo_alternate_outlined,
-                            color: _theme.accentColor,
-                          ),
-                          onPressed: _showImageOptions,
-                        ),
-                        Expanded(
-                          child: TextField(
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.add_photo_alternate_outlined,
+                      color: _theme.accentColor,
+                    ),
+                    onPressed: _isRecordingVoice ? null : _showImageOptions,
+                  ),
+                  Expanded(
+                    child: _isRecordingVoice
+                        ? _buildRecordingIndicator()
+                        : TextField(
                             controller: _messageController,
                             onChanged: _onInputChanged,
                             decoration: InputDecoration(
@@ -1665,32 +1768,48 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             style: const TextStyle(color: Colors.white),
                             onSubmitted: (text) => _sendMessage(text: text),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: _theme.myBubbleGradient,
-                            ),
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            tooltip: hasTypedText
-                                ? 'Send Message'
-                                : 'Record Voice Note',
-                            icon: Icon(
-                              hasTypedText ? Icons.send_rounded : Icons.mic,
-                              color: Colors.white,
-                            ),
-                            onPressed: hasTypedText
-                                ? () => _sendMessage(
-                                    text: _messageController.text,
-                                  )
-                                : _startVoiceRecording,
-                          ),
-                        ),
-                      ],
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(colors: _theme.myBubbleGradient),
+                      shape: BoxShape.circle,
                     ),
+                    // The Listener never unmounts across text/recording
+                    // state changes, so a held pointer always gets its
+                    // matching pointer-up or pointercancel event.
+                    child: Listener(
+                      behavior: HitTestBehavior.opaque,
+                      onPointerDown: _onMicPointerDown,
+                      onPointerMove: _onMicPointerMove,
+                      onPointerUp: _onMicPointerUp,
+                      onPointerCancel: _onMicPointerCancel,
+                      child: IconButton(
+                        // No tooltip while held: Tooltip triggers on
+                        // long-press and would pop mid-recording.
+                        tooltip: hasTypedText
+                            ? 'Send Message'
+                            : _isRecordingVoice
+                            ? null
+                            : 'Hold to Record Voice Note',
+                        icon: Icon(
+                          hasTypedText
+                              ? Icons.send_rounded
+                              : _micCancelArmed
+                              ? Icons.delete_outline
+                              : Icons.mic,
+                          color: _micCancelArmed && !hasTypedText
+                              ? Colors.redAccent
+                              : Colors.white,
+                        ),
+                        onPressed: hasTypedText
+                            ? () => _sendMessage(text: _messageController.text)
+                            : () {},
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ],

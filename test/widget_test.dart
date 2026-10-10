@@ -3,6 +3,7 @@ import 'package:calculator/screens/calculator_screen.dart';
 import 'package:calculator/screens/chat_screen.dart';
 import 'package:calculator/screens/pairing_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -142,6 +143,115 @@ void main() {
       await tester.tap(find.byTooltip('Search Messages'));
       await tester.pump();
       expect(find.byType(TextField), findsNWidgets(2));
+    });
+  });
+
+  group('Voice note hold-to-record', () {
+    const nativeChannel = MethodChannel('com.keshabstudios.calculator/native');
+
+    void mockNativeChannel(WidgetTester tester) {
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        nativeChannel,
+        (call) async {
+          switch (call.method) {
+            case 'ensureMicPermission':
+              return true;
+            case 'startRecording':
+            case 'stopRecording':
+              // Path intentionally missing on disk so the send flow bails
+              // out at File.existsSync before touching Firebase.
+              return '/tmp/hold_to_record_fake.m4a';
+            default:
+              return null;
+          }
+        },
+      );
+    }
+
+    Future<void> pumpChat(WidgetTester tester) async {
+      await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
+      await tester.pump();
+    }
+
+    testWidgets(
+      'holding the mic shows recording UI and release sends the note',
+      (tester) async {
+        mockNativeChannel(tester);
+        await pumpChat(tester);
+
+        final gesture = await tester.startGesture(
+          tester.getCenter(find.byTooltip('Hold to Record Voice Note')),
+        );
+        await tester.pump();
+        await tester.pump();
+
+        // Recording UI replaced the text field while the mic is held.
+        expect(find.textContaining('release to send'), findsOneWidget);
+        expect(find.byTooltip('Hold to Record Voice Note'), findsNothing);
+
+        // Tick the fake clock past the minimum hold so release counts
+        // as a deliberate send rather than an accidental brush.
+        await tester.pump(const Duration(seconds: 1));
+        expect(find.textContaining('Recording 1s'), findsOneWidget);
+
+        await gesture.up();
+        await tester.pump();
+        await tester.pump();
+
+        // Note released: input bar restored, no crash from the missing
+        // audio file (send bails before any Firebase call).
+        expect(find.textContaining('release to send'), findsNothing);
+        expect(find.byTooltip('Hold to Record Voice Note'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    testWidgets('sliding left while holding arms the cancel', (tester) async {
+      mockNativeChannel(tester);
+      await pumpChat(tester);
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byTooltip('Hold to Record Voice Note')),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('release to send'), findsOneWidget);
+
+      await gesture.moveBy(const Offset(-100, 0));
+      await tester.pump();
+      expect(find.text('Release to cancel'), findsOneWidget);
+
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+
+      // Cancelled: recording UI gone, input bar back.
+      expect(find.text('Release to cancel'), findsNothing);
+      expect(find.textContaining('release to send'), findsNothing);
+      expect(find.byTooltip('Hold to Record Voice Note'), findsOneWidget);
+    });
+
+    testWidgets('releasing too quickly cancels and shows hold hint', (
+      tester,
+    ) async {
+      mockNativeChannel(tester);
+      await pumpChat(tester);
+
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byTooltip('Hold to Record Voice Note')),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.textContaining('release to send'), findsOneWidget);
+
+      // Release without ticking any fake time: under the 600 ms threshold
+      // (real elapsed wall time in the test is milliseconds).
+      await gesture.up();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.textContaining('release to send'), findsNothing);
+      expect(find.text('Hold to record a voice note'), findsOneWidget);
     });
   });
 }
