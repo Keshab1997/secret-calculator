@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 import 'chat_screen.dart';
 
 class CalculatorScreen extends StatefulWidget {
