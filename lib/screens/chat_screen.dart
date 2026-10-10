@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_database.dart';
+import 'package:firebase_database/firebase_database.dart';
 
 import 'dart:io';
 
