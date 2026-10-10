@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'chat_screen.dart';
+import 'pairing_screen.dart';
 
 class CalculatorScreen extends StatefulWidget {
   const CalculatorScreen({super.key});
@@ -145,7 +145,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   void _navigateToChat() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const ChatScreen()),
+      MaterialPageRoute(builder: (context) => const PairingScreen()),
     );
   }
 

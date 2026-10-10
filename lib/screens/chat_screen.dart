@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:firebase_database.dart';
 import 'dart:io';
+import '../services/firebase_service.dart';
+import '../services/encryption_service.dart';
+import '../services/notification_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -9,11 +13,16 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final TextEditingController _messageController = TextEditingController();
   final List<ChatMessage> _messages = [];
   final ImagePicker _picker = ImagePicker();
+  final FirebaseService _firebase = FirebaseService();
+  final EncryptionService _encryption = EncryptionService();
+  final NotificationService _notifications = NotificationService();
   bool _showEmojiPicker = false;
+  bool _isPartnerOnline = false;
+  String _partnerLastSeen = '';
 
   final List<String> _emojis = [
     '😀', '😂', '😍', '🥰', '😘', '😊', '😉', '😎',
@@ -22,18 +31,84 @@ class _ChatScreenState extends State<ChatScreen> {
     '🎊', '👏', '🙌', '💪', '👍', '👎', '🤝', '🙏',
   ];
 
-  void _sendMessage({String? text, File? image}) {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _firebase.updateOnlineStatus(true);
+    _listenForMessages();
+    _listenForPartnerStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _firebase.updateOnlineStatus(false);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _firebase.updateOnlineStatus(true);
+    } else {
+      _firebase.updateOnlineStatus(false);
+    }
+  }
+
+  void _listenForMessages() {
+    _firebase.getMessagesStream().listen((event) {
+      if (event.snapshot.value != null) {
+        final data = event.snapshot.value as Map<dynamic, dynamic>;
+        data.forEach((key, value) {
+          final message = value as Map<dynamic, dynamic>;
+          final decryptedText = message['text'] != null 
+              ? _encryption.decrypt(message['text']) 
+              : null;
+          
+          setState(() {
+            _messages.add(ChatMessage(
+              text: decryptedText,
+              imageUrl: message['imageUrl'],
+              isMe: message['senderId'] == _firebase.getShortCode().toLowerCase(),
+              timestamp: DateTime.fromMillisecondsSinceEpoch(message['timestamp'] ?? 0),
+            ));
+          });
+
+          // Show fake notification for new messages
+          if (message['senderId'] != _firebase.getShortCode().toLowerCase()) {
+            _notifications.showFakeNotification();
+          }
+        });
+      }
+    });
+  }
+
+  void _listenForPartnerStatus() {
+    _firebase.getPartnerStatusStream().listen((event) {
+      if (event.snapshot.value != null) {
+        final data = event.snapshot.value as Map<dynamic, dynamic>;
+        setState(() {
+          _isPartnerOnline = data['isOnline'] ?? false;
+          if (data['lastSeen'] != null) {
+            final lastSeen = DateTime.fromMillisecondsSinceEpoch(data['lastSeen']);
+            _partnerLastSeen = '${lastSeen.hour}:${lastSeen.minute.toString().padLeft(2, '0')}';
+          }
+        });
+      }
+    });
+  }
+
+  void _sendMessage({String? text, File? image}) async {
     if (text == null && image == null) return;
     if (text != null && text.trim().isEmpty) return;
 
-    setState(() {
-      _messages.add(ChatMessage(
-        text: text,
-        image: image,
-        isMe: true,
-        timestamp: DateTime.now(),
-      ));
-    });
+    String? imageUrl;
+    if (image != null) {
+      imageUrl = await _firebase.uploadImage(image);
+    }
+
+    await _firebase.sendMessage(text ?? '', imageUrl: imageUrl);
     _messageController.clear();
   }
 
@@ -105,16 +180,6 @@ class _ChatScreenState extends State<ChatScreen> {
                 );
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.sms, color: Colors.orange),
-              title: const Text('Send SMS'),
-              onTap: () {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('SMS feature coming soon!')),
-                );
-              },
-            ),
           ],
         ),
       ),
@@ -125,18 +190,24 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Row(
+        title: Row(
           children: [
-            CircleAvatar(
+            const CircleAvatar(
               backgroundColor: Colors.pink,
               child: Icon(Icons.person, color: Colors.white),
             ),
-            SizedBox(width: 12),
+            const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Secret Chat', style: TextStyle(fontSize: 16)),
-                Text('Online', style: TextStyle(fontSize: 12, color: Colors.green)),
+                const Text('Secret Chat', style: TextStyle(fontSize: 16)),
+                Text(
+                  _isPartnerOnline ? 'Online' : 'Last seen $_partnerLastSeen',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _isPartnerOnline ? Colors.green : Colors.grey,
+                  ),
+                ),
               ],
             ),
           ],
@@ -288,14 +359,30 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (message.image != null)
+            if (message.imageUrl != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: Image.file(
-                  message.image!,
+                child: Image.network(
+                  message.imageUrl!,
                   width: 200,
                   height: 200,
                   fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      width: 200,
+                      height: 200,
+                      color: Colors.grey[800],
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          value: loadingProgress.expectedTotalBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                  loadingProgress.expectedTotalBytes!
+                              : null,
+                        ),
+                      ),
+                    );
+                  },
                 ),
               ),
             if (message.text != null)
@@ -320,13 +407,13 @@ class _ChatScreenState extends State<ChatScreen> {
 
 class ChatMessage {
   final String? text;
-  final File? image;
+  final String? imageUrl;
   final bool isMe;
   final DateTime timestamp;
 
   ChatMessage({
     this.text,
-    this.image,
+    this.imageUrl,
     required this.isMe,
     required this.timestamp,
   });

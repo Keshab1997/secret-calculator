@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "374839938612",
+    "project_id": "secret-calculator-fce20",
+    "storage_bucket": "secret-calculator-fce20.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:374839938612:android:f8145c9563988861874461",
+        "android_client_info": {
+          "package_name": "com.keshabstudios.calculator"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC-nMKsyFZEG1Noc2O0-IKa3M2W3eo_H2o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": 1
+}
