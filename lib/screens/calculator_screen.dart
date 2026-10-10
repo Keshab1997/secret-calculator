@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../services/firebase_service.dart';
+import 'chat_screen.dart';
 import 'pairing_screen.dart';
 
 /// Pure calculator state machine with secret-code detection.
@@ -174,9 +176,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   void _navigateToChat() {
+    final destination = FirebaseService().isPaired
+        ? const ChatScreen()
+        : const PairingScreen();
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const PairingScreen()),
+      MaterialPageRoute(builder: (context) => destination),
     );
   }
 

@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
 import '../services/notification_service.dart';
+import 'pairing_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -318,7 +319,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         foregroundColor: Colors.white,
         actions: [
           IconButton(icon: const Icon(Icons.call), onPressed: _showCallOptions),
-          IconButton(icon: const Icon(Icons.more_vert), onPressed: () {}),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) async {
+              if (value == 're_pair') {
+                await _firebase.leaveRoom();
+                if (!context.mounted) return;
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const PairingScreen(),
+                  ),
+                );
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem<String>(
+                enabled: false,
+                child: Text('Room: ${_firebase.getShortCode()}'),
+              ),
+              const PopupMenuItem<String>(
+                value: 're_pair',
+                child: Text('Pair New Device'),
+              ),
+            ],
+          ),
         ],
       ),
       body: Column(

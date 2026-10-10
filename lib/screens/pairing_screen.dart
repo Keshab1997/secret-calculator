@@ -69,10 +69,12 @@ class _PairingScreenState extends State<PairingScreen> {
     });
   }
 
-  void _openChat() {
+  Future<void> _openChat() async {
     if (!mounted || _hasNavigated) return;
     _hasNavigated = true;
     _membersSub?.cancel();
+    await _firebase.markRoomPaired();
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const ChatScreen()),
