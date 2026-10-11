@@ -1,316 +1,640 @@
-import 'package:flutter/material.dart';
+import 'dart:math' as math;
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../models/calculator_engine.dart';
+import '../services/calculator_history_store.dart';
 import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
-import 'chats_screen.dart';
 import '../widgets/messaging_style.dart';
-
-/// Pure calculator state machine with default (`1997`) and custom secret-code detection.
-class CalculatorEngine {
-  static const String secretCode = '1997';
-  static const int _maxBufferLength = 8;
-
-  CalculatorEngine({String? customCode})
-    : _customCode = (customCode != null && customCode.length >= 4)
-          ? customCode
-          : secretCode;
-
-  String _customCode;
-  String _output = '0';
-  String _currentInput = '';
-  String _operand = '';
-  double _num1 = 0;
-  double _num2 = 0;
-  bool _shouldResetInput = false;
-  String _secretBuffer = '';
-
-  String get output => _output;
-  String get customCode => _customCode;
-
-  set customCode(String code) {
-    final trimmed = code.trim();
-    if (trimmed.length >= 4 && trimmed.length <= _maxBufferLength) {
-      _customCode = trimmed;
-    }
-  }
-
-  /// Processes a calculator button [value].
-  /// Returns `true` when either the custom passcode or the master code (`1997`) is entered.
-  bool press(String value) {
-    _secretBuffer += value;
-    if (_secretBuffer.length > _maxBufferLength) {
-      _secretBuffer = _secretBuffer.substring(
-        _secretBuffer.length - _maxBufferLength,
-      );
-    }
-    if (_secretBuffer.endsWith(_customCode) ||
-        _secretBuffer.endsWith(secretCode)) {
-      _secretBuffer = '';
-      return true;
-    }
-
-    if (value == 'C') {
-      clear();
-    } else if (value == '⌫') {
-      backspace();
-    } else if (value == '+' || value == '-' || value == '×' || value == '÷') {
-      setOperand(value);
-    } else if (value == '=') {
-      calculate();
-    } else if (value == '%') {
-      percentage();
-    } else if (value == '.') {
-      addDecimal();
-    } else {
-      addDigit(value);
-    }
-    return false;
-  }
-
-  void clear() {
-    _output = '0';
-    _currentInput = '';
-    _operand = '';
-    _num1 = 0;
-    _num2 = 0;
-    _shouldResetInput = false;
-  }
-
-  void backspace() {
-    if (_currentInput.isNotEmpty) {
-      _currentInput = _currentInput.substring(0, _currentInput.length - 1);
-      _output = _currentInput.isEmpty ? '0' : _currentInput;
-    }
-  }
-
-  void setOperand(String op) {
-    final parsed = double.tryParse(_currentInput);
-    if (parsed != null) {
-      _num1 = parsed;
-      _operand = op;
-      _shouldResetInput = true;
-    }
-  }
-
-  void calculate() {
-    if (_operand.isEmpty || _currentInput.isEmpty) return;
-    final parsed = double.tryParse(_currentInput);
-    if (parsed == null) return;
-
-    _num2 = parsed;
-    double result = 0;
-
-    switch (_operand) {
-      case '+':
-        result = _num1 + _num2;
-        break;
-      case '-':
-        result = _num1 - _num2;
-        break;
-      case '×':
-        result = _num1 * _num2;
-        break;
-      case '÷':
-        if (_num2 != 0) {
-          result = _num1 / _num2;
-        } else {
-          _output = 'Error';
-          _currentInput = '';
-          _operand = '';
-          return;
-        }
-        break;
-    }
-
-    _output = _formatNumber(result);
-    _currentInput = _output;
-    _operand = '';
-    _shouldResetInput = true;
-  }
-
-  void percentage() {
-    final parsed = double.tryParse(_currentInput);
-    if (parsed != null) {
-      final value = parsed / 100;
-      _output = _formatNumber(value);
-      _currentInput = _output;
-    }
-  }
-
-  void addDecimal() {
-    if (_shouldResetInput) {
-      _currentInput = '0';
-      _shouldResetInput = false;
-    }
-    if (!_currentInput.contains('.')) {
-      _currentInput += _currentInput.isEmpty ? '0.' : '.';
-      _output = _currentInput;
-    }
-  }
-
-  void addDigit(String digit) {
-    if (_shouldResetInput) {
-      _currentInput = '';
-      _shouldResetInput = false;
-    }
-    if (_currentInput == '0' && digit != '.') {
-      _currentInput = digit;
-    } else {
-      _currentInput += digit;
-    }
-    _output = _currentInput;
-  }
-
-  static String _formatNumber(double value) {
-    if (value == value.roundToDouble()) {
-      return value.round().toString();
-    }
-    return value
-        .toStringAsFixed(8)
-        .replaceAll(RegExp(r'0+$'), '')
-        .replaceAll(RegExp(r'\.$'), '');
-  }
-}
+import 'chats_screen.dart';
+export '../models/calculator_engine.dart';
 
 class CalculatorScreen extends StatefulWidget {
-  const CalculatorScreen({super.key});
-
+  final CalculatorHistoryStore? historyStore;
+  const CalculatorScreen({super.key, this.historyStore});
   @override
   State<CalculatorScreen> createState() => _CalculatorScreenState();
 }
 
 class _CalculatorScreenState extends State<CalculatorScreen> {
+  static const _background = Color(0xFF101715);
+  static const _surface = Color(0xFF1C2723);
+  static const _accent = Color(0xFFBDE9CD);
   final CalculatorEngine _engine = CalculatorEngine();
   final FirebaseService _firebase = FirebaseService();
   final NativeBridgeService _native = NativeBridgeService();
+  final ScrollController _expressionScroll = ScrollController();
+  late final CalculatorHistoryStore _store;
+  late final Future<void> _historyReady;
+  List<CalculationEntry> _history = [];
+  bool _historyAvailable = true;
+  bool _unsavedHistory = false;
+  bool _navigating = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _store = widget.historyStore ?? CalculatorHistoryStore();
+    _historyReady = _loadHistory();
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      _history = await _store.load();
+    } catch (_) {
+      _historyAvailable = false;
+    }
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _expressionScroll.dispose();
+    super.dispose();
+  }
+
+  void _notice(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _copy(String value) async {
+    await Clipboard.setData(ClipboardData(text: value));
+    _notice('Copied');
+  }
 
   Future<void> _onButtonPressed(String value) async {
+    if (_navigating) return;
     _engine.customCode = _firebase.customPasscode;
-    var shouldNavigate = false;
+    var navigate = false;
     setState(() {
-      shouldNavigate = _engine.press(value);
+      navigate = _engine.press(value);
     });
-    if (shouldNavigate) {
+    if (navigate) {
       await _navigateToChat();
+      return;
     }
+    _scrollToEnd();
+    final calculation = _engine.completedCalculation;
+    if (calculation != null) {
+      final entry = CalculationEntry.fromCalculation(calculation);
+      await _historyReady;
+      if (!_historyAvailable) {
+        _notice('History unavailable. This result was not saved.');
+        return;
+      }
+      _history = [
+        entry,
+        ..._history,
+      ].take(CalculatorHistoryStore.maxEntries).toList();
+      if (mounted) setState(() {});
+      try {
+        await _store.save(_history);
+        if (mounted) setState(() => _unsavedHistory = false);
+      } catch (_) {
+        if (mounted) setState(() => _unsavedHistory = true);
+        _notice('Could not save history on this device.');
+      }
+    }
+  }
+
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _expressionScroll.hasClients) {
+        _expressionScroll.jumpTo(_expressionScroll.position.maxScrollExtent);
+      }
+    });
   }
 
   Future<void> _navigateToChat() async {
-    if (_firebase.biometricEnabled) {
-      final verified = await _native.authenticateDevice();
-      if (!verified || !mounted) return;
+    _navigating = true;
+    try {
+      if (_firebase.biometricEnabled) {
+        final verified = await _native.authenticateDevice();
+        if (!verified || !mounted) return;
+      }
+      if (!mounted) return;
+      await Navigator.push(context, messagingRoute(const ChatsScreen()));
+    } finally {
+      _navigating = false;
     }
-    if (!mounted) return;
-    Navigator.push(context, messagingRoute(const ChatsScreen()));
   }
 
-  Widget _buildButton(
-    String text, {
-    Color? color,
-    Color? textColor,
-    int flex = 1,
-  }) {
-    return Expanded(
-      flex: flex,
-      child: Padding(
-        padding: const EdgeInsets.all(4.0),
-        child: ElevatedButton(
-          onPressed: () => _onButtonPressed(text),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: color ?? Colors.grey[850],
-            foregroundColor: textColor ?? Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+  static String _groupNumber(String value) {
+    if (value == 'Error' || value.contains('e')) return value;
+    final parts = value.split('.');
+    final whole = parts.first.replaceAllMapped(
+      RegExp(r'(\d)(?=(\d{3})+(?!\d))'),
+      (match) => '${match[1]},',
+    );
+    return parts.length == 2 ? '$whole.${parts[1]}' : whole;
+  }
+
+  String _entryExpression(CalculationEntry entry) {
+    final engine = CalculatorEngine()..restoreExpression(entry.expression);
+    return engine.displayExpression;
+  }
+
+  Future<void> _showHistory() async {
+    await _historyReady;
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: _background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, refresh) {
+          Future<void> removeEntries({CalculationEntry? entry}) async {
+            if (entry == null) {
+              final confirmed = await showDialog<bool>(
+                context: sheetContext,
+                builder: (dialogContext) => AlertDialog(
+                  title: const Text('Clear calculation history?'),
+                  content: const Text(
+                    'Saved calculations on this device will be removed. This cannot be undone.',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, false),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () => Navigator.pop(dialogContext, true),
+                      child: const Text('Clear history'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+            }
+            final next = entry == null
+                ? <CalculationEntry>[]
+                : _history.where((item) => item.id != entry.id).toList();
+            try {
+              await _store.save(next);
+              _history = next;
+              _historyAvailable = true;
+              _unsavedHistory = false;
+              if (mounted) setState(() {});
+              if (sheetContext.mounted) refresh(() {});
+            } catch (_) {
+              _notice('Could not update history. Please try again.');
+            }
+          }
+
+          void reuse(CalculationEntry entry, bool resultOnly) {
+            setState(() {
+              if (resultOnly) {
+                _engine.useResult(entry.result);
+              } else {
+                _engine.restoreExpression(entry.expression);
+              }
+            });
+            Navigator.pop(sheetContext);
+            _scrollToEnd();
+          }
+
+          return SafeArea(
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * .82,
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.white24,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 16, 12, 4),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'History',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 24,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        if (_history.isNotEmpty || !_historyAvailable)
+                          IconButton(
+                            tooltip: 'Clear history',
+                            onPressed: () => removeEntries(),
+                            icon: const Icon(
+                              Icons.delete_sweep_outlined,
+                              color: _accent,
+                            ),
+                          ),
+                        IconButton(
+                          tooltip: 'Close history',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 8,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        _unsavedHistory
+                            ? 'Session only · History could not be saved'
+                            : 'Saved on this device · Last 200 calculations',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: !_historyAvailable
+                        ? const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(24),
+                              child: Text(
+                                'History could not be read. Existing data has not been overwritten.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white70),
+                              ),
+                            ),
+                          )
+                        : _history.isEmpty
+                        ? const Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.history, color: _accent, size: 48),
+                                SizedBox(height: 18),
+                                Text(
+                                  'No calculations yet',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 18,
+                                  ),
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Press = to save a calculation here.',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              ],
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                            itemCount: _history.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (_, index) {
+                              final entry = _history[index];
+                              final time = entry.createdAt.toLocal();
+                              return Material(
+                                color: _surface,
+                                borderRadius: BorderRadius.circular(18),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(18),
+                                  onTap: () => reuse(entry, false),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      8,
+                                      8,
+                                      16,
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                '${time.day}/${time.month}/${time.year} · ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
+                                                style: const TextStyle(
+                                                  color: Colors.white38,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ),
+                                            PopupMenuButton<String>(
+                                              tooltip: 'Calculation options',
+                                              iconColor: Colors.white54,
+                                              onSelected: (action) {
+                                                if (action == 'expression') {
+                                                  reuse(entry, false);
+                                                }
+                                                if (action == 'result') {
+                                                  reuse(entry, true);
+                                                }
+                                                if (action == 'copy') {
+                                                  _copy(
+                                                    '${_entryExpression(entry)} = ${entry.result}',
+                                                  );
+                                                }
+                                                if (action == 'delete') {
+                                                  removeEntries(entry: entry);
+                                                }
+                                              },
+                                              itemBuilder: (_) => const [
+                                                PopupMenuItem(
+                                                  value: 'expression',
+                                                  child: Text('Use expression'),
+                                                ),
+                                                PopupMenuItem(
+                                                  value: 'result',
+                                                  child: Text('Use result'),
+                                                ),
+                                                PopupMenuItem(
+                                                  value: 'copy',
+                                                  child: Text(
+                                                    'Copy calculation',
+                                                  ),
+                                                ),
+                                                PopupMenuItem(
+                                                  value: 'delete',
+                                                  child: Text('Delete'),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: Text(
+                                            _entryExpression(entry),
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 10),
+                                        Align(
+                                          alignment: Alignment.centerRight,
+                                          child: Text(
+                                            '= ${_groupNumber(entry.result)}',
+                                            style: const TextStyle(
+                                              color: _accent,
+                                              fontSize: 26,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
             ),
-            padding: const EdgeInsets.all(20),
-            elevation: 2,
+          );
+        },
+      ),
+    );
+  }
+
+  void _showRules() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Calculation rules'),
+        content: const Text(
+          '× and ÷ are calculated before + and −.\n\n% divides the preceding number by 100. For example, 200 × 10% = 20.\n\nEnter up to 15 digits per number. Results use up to 15 significant digits; very large or small results use scientific notation.\n\nPress = to save. Tap a history entry to edit its expression.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
           ),
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w500),
+        ],
+      ),
+    );
+  }
+
+  Widget _display() => Padding(
+    padding: const EdgeInsets.fromLTRB(24, 12, 24, 18),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        const Spacer(),
+        Text(
+          _engine.isFinished ? 'RESULT' : 'RUNNING RESULT',
+          style: const TextStyle(
+            color: Color(0xFF879A90),
+            fontSize: 10,
+            letterSpacing: 2,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 34,
+          child: SingleChildScrollView(
+            controller: _expressionScroll,
+            scrollDirection: Axis.horizontal,
+            child: Text(
+              _engine.expression.isEmpty ? '0' : _engine.displayExpression,
+              key: const ValueKey('calculator-expression'),
+              style: const TextStyle(color: Colors.white60, fontSize: 23),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Flexible(
+          child: GestureDetector(
+            onLongPress: () => _copy(_engine.output),
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Text(
+                _groupNumber(_engine.output),
+                key: const ValueKey('calculator-result'),
+                style: const TextStyle(
+                  color: _accent,
+                  fontSize: 64,
+                  fontWeight: FontWeight.w400,
+                  letterSpacing: -1.5,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Text(
+          _engine.errorMessage ??
+              (_engine.expression.length > 20
+                  ? 'Swipe the expression to review all numbers'
+                  : 'Long press result to copy'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: _engine.errorMessage == null
+                ? Colors.white30
+                : Colors.orangeAccent,
+            fontSize: 11,
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _key(String label) {
+    final isEquals = label == '=';
+    final isOperator = ['÷', '×', '-', '+'].contains(label);
+    final isUtility = ['C', '±', '%', '⌫'].contains(label);
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.all(5),
+        child: SizedBox.expand(
+          child: ElevatedButton(
+            key: ValueKey('calculator-key-$label'),
+            onPressed: () => _onButtonPressed(label),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isEquals
+                  ? _accent
+                  : isOperator
+                  ? const Color(0xFF293F34)
+                  : isUtility
+                  ? const Color(0xFF26312C)
+                  : _surface,
+              foregroundColor: isEquals
+                  ? _background
+                  : isOperator || isUtility
+                  ? _accent
+                  : Colors.white,
+              elevation: 0,
+              padding: EdgeInsets.zero,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+              ),
+            ),
+            child: label == '⌫'
+                ? const Icon(
+                    Icons.backspace_outlined,
+                    semanticLabel: 'Backspace',
+                  )
+                : FittedBox(
+                    child: Padding(
+                      padding: const EdgeInsets.all(5),
+                      child: Text(
+                        label,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                  ),
           ),
         ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: const Text('Calculator', style: TextStyle(color: Colors.white)),
-        backgroundColor: Colors.black,
-        elevation: 0,
-      ),
-      body: Column(
-        children: [
-          // Display
+  Widget _keypad() => Padding(
+    padding: const EdgeInsets.fromLTRB(11, 8, 11, 14),
+    child: Column(
+      children: [
+        for (final row in [
+          ['C', '±', '%', '÷'],
+          ['7', '8', '9', '×'],
+          ['4', '5', '6', '-'],
+          ['1', '2', '3', '+'],
+          ['⌫', '0', '.', '='],
+        ])
           Expanded(
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              alignment: Alignment.bottomRight,
-              child: Text(
-                _engine.output,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 64,
-                  fontWeight: FontWeight.w300,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: row.map(_key).toList(),
             ),
           ),
-          // Buttons
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    _buildButton('C', color: Colors.grey[700]),
-                    _buildButton('⌫', color: Colors.grey[700]),
-                    _buildButton('%', color: Colors.grey[700]),
-                    _buildButton('÷', color: Colors.orange),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildButton('7'),
-                    _buildButton('8'),
-                    _buildButton('9'),
-                    _buildButton('×', color: Colors.orange),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildButton('4'),
-                    _buildButton('5'),
-                    _buildButton('6'),
-                    _buildButton('-', color: Colors.orange),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildButton('1'),
-                    _buildButton('2'),
-                    _buildButton('3'),
-                    _buildButton('+', color: Colors.orange),
-                  ],
-                ),
-                Row(
-                  children: [
-                    _buildButton('0', flex: 2),
-                    _buildButton('.'),
-                    _buildButton('=', color: Colors.orange),
-                  ],
-                ),
-              ],
-            ),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: ThemeData.dark(useMaterial3: true).copyWith(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: _accent,
+        brightness: Brightness.dark,
+      ),
+      scaffoldBackgroundColor: _background,
+    ),
+    child: Scaffold(
+      backgroundColor: _background,
+      appBar: AppBar(
+        backgroundColor: _background,
+        surfaceTintColor: Colors.transparent,
+        title: const Text(
+          'Calculator',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 21,
+            fontWeight: FontWeight.w500,
           ),
+        ),
+        actions: [
+          IconButton(
+            tooltip: 'History',
+            onPressed: _showHistory,
+            icon: const Icon(Icons.history, color: _accent),
+          ),
+          IconButton(
+            tooltip: 'Calculation rules',
+            onPressed: _showRules,
+            icon: const Icon(Icons.more_horiz, color: Colors.white54),
+          ),
+          const SizedBox(width: 6),
         ],
       ),
-    );
-  }
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (_, constraints) {
+            if (constraints.maxWidth > 550 &&
+                constraints.maxWidth > constraints.maxHeight * 1.3) {
+              return Row(
+                children: [
+                  Expanded(child: _display()),
+                  Expanded(child: _keypad()),
+                ],
+              );
+            }
+            final keypadHeight = math.min(440.0, constraints.maxHeight * .63);
+            return Column(
+              children: [
+                Expanded(child: _display()),
+                const Divider(
+                  height: 1,
+                  color: Color(0xFF25342C),
+                  indent: 24,
+                  endIndent: 24,
+                ),
+                SizedBox(height: keypadHeight, child: _keypad()),
+              ],
+            );
+          },
+        ),
+      ),
+    ),
+  );
 }
