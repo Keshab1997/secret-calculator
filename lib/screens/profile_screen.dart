@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/firebase_service.dart';
 import '../widgets/messaging_style.dart';
+import '../widgets/option_sheet.dart';
 import '../widgets/security_settings.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -100,25 +101,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   /// One section of the profile, on a soft card so the settings read as
   /// groups instead of a single page of loose fields.
-  Widget _card({required Widget child}) => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF7F8FA),
-      borderRadius: BorderRadius.circular(18),
-      border: Border.all(color: const Color(0xFFE7E9EE)),
-    ),
-    child: child,
-  );
+  Widget _card({required Widget child}) {
+    final palette = MessagingPalette.of(context);
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: palette.card,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: palette.cardBorder),
+      ),
+      child: child,
+    );
+  }
 
   Widget _sectionLabel(String text) => Padding(
     padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
     child: Text(
       text.toUpperCase(),
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11,
         letterSpacing: 0.8,
         fontWeight: FontWeight.w600,
-        color: Color(0xFF8A919E),
+        color: MessagingPalette.of(context).sub,
       ),
     ),
   );
@@ -156,12 +160,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: MessagingPalette.of(context).sub,
+                  ),
                 ),
               ],
             ),
           ),
-          Icon(Icons.chevron_right, size: 20, color: Colors.grey[400]),
+          Icon(
+            Icons.chevron_right,
+            size: 20,
+            color: MessagingPalette.of(context).sub,
+          ),
         ],
       ),
     ),
@@ -172,20 +183,70 @@ class _ProfileScreenState extends State<ProfileScreen> {
         labelText: label,
         prefixIcon: Icon(icon, size: 20),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: MessagingPalette.of(context).fieldFill,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: BorderSide.none,
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFE7E9EE)),
+          borderSide: BorderSide(
+            color: MessagingPalette.of(context).fieldBorder,
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: chatGreen, width: 1.4),
         ),
       );
+
+  String _darkModeLabel() {
+    switch (FirebaseService().themeMode) {
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+      case ThemeMode.system:
+        return 'Follow the phone';
+    }
+  }
+
+  Future<void> _showDarkModeOptions() async {
+    final current = FirebaseService().themeMode;
+    final choice = await showOptionSheet(
+      context,
+      title: 'Dark mode',
+      subtitle: 'Only the messaging side changes — the calculator stays dark',
+      items: [
+        OptionSheetItem(
+          value: 'system',
+          icon: Icons.brightness_auto_outlined,
+          label: 'Automatic',
+          subtitle: current == ThemeMode.system ? 'In use' : 'Follow the phone',
+        ),
+        OptionSheetItem(
+          value: 'light',
+          icon: Icons.light_mode_outlined,
+          label: 'Light',
+          subtitle: current == ThemeMode.light ? 'In use' : null,
+        ),
+        OptionSheetItem(
+          value: 'dark',
+          icon: Icons.dark_mode_outlined,
+          label: 'Dark',
+          subtitle: current == ThemeMode.dark ? 'In use' : null,
+        ),
+      ],
+    );
+    if (choice == null || !mounted) return;
+    final mode = switch (choice) {
+      'light' => ThemeMode.light,
+      'dark' => ThemeMode.dark,
+      _ => ThemeMode.system,
+    };
+    await FirebaseService().setThemeMode(mode);
+    if (mounted) setState(() {});
+  }
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -252,6 +313,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     : () => showSecuritySettingsSheet(context),
               ),
               const Divider(height: 20),
+              _tile(
+                icon: Icons.dark_mode_outlined,
+                title: 'Dark mode',
+                subtitle: _darkModeLabel(),
+                onTap: _saving ? () {} : _showDarkModeOptions,
+              ),
               TextField(
                 controller: _decoyCode,
                 enabled: !_saving,
@@ -265,7 +332,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       helperText: 'Opens an empty chat list if someone forces you to unlock',
                       helperStyle: TextStyle(
                         fontSize: 12,
-                        color: Colors.grey[600],
+                        color: MessagingPalette.of(context).sub,
                       ),
                     ),
               ),
@@ -278,10 +345,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Your profile is shared with paired contacts. The calculator name and icon on your phone do not change.',
                 style: TextStyle(
-                  color: Colors.black54,
+                  color: MessagingPalette.of(context).sub,
                   fontSize: 13,
                   height: 1.35,
                 ),

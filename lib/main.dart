@@ -23,19 +23,22 @@ class CalculatorApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Calculator',
-      debugShowCheckedModeBanner: false,
-      navigatorKey: NotificationService().navigatorKey,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blueGrey,
-          brightness: Brightness.dark,
-        ),
-        useMaterial3: true,
-        fontFamily: appFontFamily,
+    // The app-level theme IS the messaging theme: light by default, with a
+    // full dark variant the user can switch to from the profile. Flipping it
+    // republishes through the service's notifier, so the whole tree re-skins
+    // in place. The calculator face carries its own dark theme and never
+    // follows the mode.
+    return ValueListenableBuilder<ThemeMode>(
+      valueListenable: FirebaseService().themeModeChanged,
+      builder: (context, mode, _) => MaterialApp(
+        title: 'Calculator',
+        debugShowCheckedModeBanner: false,
+        navigatorKey: NotificationService().navigatorKey,
+        theme: messagingTheme,
+        darkTheme: messagingDarkTheme,
+        themeMode: mode,
+        home: const CalculatorScreen(),
       ),
-      home: const CalculatorScreen(),
     );
   }
 }

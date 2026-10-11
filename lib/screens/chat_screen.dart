@@ -47,6 +47,17 @@ class ChatThemePalette {
       accentColor: Color(0xFF168B53),
     ),
   ];
+
+  /// The night variant — WhatsApp's dark palette, applied automatically when
+  /// the app runs in dark mode.
+  static const ChatThemePalette dark = ChatThemePalette(
+    name: 'Classic Green (Dark)',
+    appBarColor: Color(0xFF111B21),
+    backgroundColor: Color(0xFF0B141A),
+    myBubbleGradient: [Color(0xFF005C4B), Color(0xFF005C4B)],
+    partnerBubbleColor: Color(0xFF202C33),
+    accentColor: Color(0xFF25D366),
+  );
 }
 
 class ChatScreen extends StatefulWidget {
@@ -140,7 +151,13 @@ class _ChatScreenState extends State<ChatScreen>
     '🙏',
   ];
 
-  ChatThemePalette get _theme => ChatThemePalette.presets[_selectedThemeIndex];
+  ChatThemePalette get _theme => MessagingPalette.isDark(context)
+      ? ChatThemePalette.dark
+      : ChatThemePalette.presets[_selectedThemeIndex];
+
+  /// Text colours resolved against the active theme — dark mode flips these.
+  Color get _ink => MessagingPalette.of(context).ink;
+  Color get _sub => MessagingPalette.of(context).sub;
 
   @override
   void initState() {
@@ -625,10 +642,7 @@ class _ChatScreenState extends State<ChatScreen>
                   : 'Recording ${_recordingSeconds}s — release to send',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: chatInk,
-                fontWeight: FontWeight.w500,
-              ),
+              style: TextStyle(color: _ink, fontWeight: FontWeight.w500),
             ),
           ),
         ],
@@ -1196,7 +1210,7 @@ class _ChatScreenState extends State<ChatScreen>
                             item.name,
                             style: Theme.of(sheetContext).textTheme.titleMedium
                                 ?.copyWith(
-                                  color: isSelected ? chatGreen : chatInk,
+                                  color: isSelected ? chatGreen : _ink,
                                 ),
                           ),
                         ),
@@ -1255,7 +1269,7 @@ class _ChatScreenState extends State<ChatScreen>
                     Text(
                       'New messages clear themselves here and on the other phone',
                       style: Theme.of(sheetContext).textTheme.bodySmall
-                          ?.copyWith(color: Colors.grey[600]),
+                          ?.copyWith(color: _sub),
                     ),
                   ],
                 ),
@@ -1281,16 +1295,14 @@ class _ChatScreenState extends State<ChatScreen>
                       children: [
                         Icon(
                           selected ? Icons.check_circle : Icons.circle_outlined,
-                          color: selected ? chatGreen : Colors.grey[400],
+                          color: selected ? chatGreen : _sub,
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Text(
                             opt.key,
                             style: Theme.of(sheetContext).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: selected ? chatGreen : chatInk,
-                                ),
+                                ?.copyWith(color: selected ? chatGreen : _ink),
                           ),
                         ),
                       ],
@@ -1334,9 +1346,9 @@ class _ChatScreenState extends State<ChatScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Room Pair Code:',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
+              style: TextStyle(color: _sub, fontSize: 12),
             ),
             const SizedBox(height: 4),
             Row(
@@ -1426,7 +1438,9 @@ class _ChatScreenState extends State<ChatScreen>
           backgroundColor: Colors.black,
           appBar: AppBar(
             backgroundColor: Colors.black,
-            foregroundColor: chatInk,
+            // The viewer is always black, in both themes — white is the only
+            // foreground that reads on it.
+            foregroundColor: Colors.white,
             title: const Text('Encrypted Photo'),
           ),
           body: Center(
@@ -1475,16 +1489,16 @@ class _ChatScreenState extends State<ChatScreen>
         backgroundColor: _theme.backgroundColor,
         appBar: AppBar(
           backgroundColor: _theme.appBarColor,
-          foregroundColor: chatInk,
+          foregroundColor: _ink,
           titleSpacing: 0,
           title: _isSearching
               ? TextField(
                   controller: _searchController,
                   autofocus: true,
-                  style: const TextStyle(color: chatInk),
-                  decoration: const InputDecoration(
+                  style: TextStyle(color: _ink),
+                  decoration: InputDecoration(
                     hintText: 'Search messages…',
-                    hintStyle: TextStyle(color: Colors.black45),
+                    hintStyle: TextStyle(color: _sub),
                     border: InputBorder.none,
                   ),
                   onChanged: (value) => setState(() => _searchQuery = value),
@@ -1514,7 +1528,7 @@ class _ChatScreenState extends State<ChatScreen>
                               decoration: BoxDecoration(
                                 color: _isPartnerOnline
                                     ? Colors.greenAccent
-                                    : Colors.grey,
+                                    : _sub,
                                 shape: BoxShape.circle,
                                 border: Border.all(
                                   color: _theme.appBarColor,
@@ -1561,7 +1575,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   fontSize: 12,
                                   color: _isPartnerOnline
                                       ? Colors.greenAccent
-                                      : Colors.grey[400],
+                                      : _sub,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1600,9 +1614,15 @@ class _ChatScreenState extends State<ChatScreen>
           ],
         ),
         body: CustomPaint(
-          painter: ChatWallpaper(),
+          painter: ChatWallpaper(
+            line: MessagingPalette.isDark(context)
+                ? const Color(0xFF15212B)
+                : const Color(0xFFE4DED2),
+          ),
           child: Column(
             children: [
+              if (_searchQuery.trim().isNotEmpty)
+                _buildSearchBanner(displayedMessages.length),
               Expanded(
                 child: displayedMessages.isEmpty && _outgoing.isEmpty
                     ? Center(
@@ -1644,7 +1664,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 style: TextStyle(
                                   fontSize: 13.5,
                                   height: 1.35,
-                                  color: Colors.grey[600],
+                                  color: _sub,
                                 ),
                               ),
                             ],
@@ -1718,10 +1738,7 @@ class _ChatScreenState extends State<ChatScreen>
                               _replyingTo!.text ?? '📷 Photo',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: Colors.black54,
-                              ),
+                              style: TextStyle(fontSize: 13, color: _sub),
                             ),
                           ],
                         ),
@@ -1798,8 +1815,8 @@ class _ChatScreenState extends State<ChatScreen>
                                             vertical: 12,
                                           ),
                                         ),
-                                        style: const TextStyle(
-                                          color: chatInk,
+                                        style: TextStyle(
+                                          color: _ink,
                                           fontSize: 17,
                                         ),
                                         onSubmitted: (text) =>
@@ -1969,10 +1986,7 @@ class _ChatScreenState extends State<ChatScreen>
           color: _theme.appBarColor,
           borderRadius: BorderRadius.circular(12),
         ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-        ),
+        child: Text(label, style: TextStyle(fontSize: 11, color: _sub)),
       ),
     );
   }
@@ -1985,142 +1999,194 @@ class _ChatScreenState extends State<ChatScreen>
     final uploading = !failed && pending.progress != null;
     final progress = pending.progress ?? 0;
 
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 4),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        decoration: BoxDecoration(
-          color: failed
-              ? const Color(0xFFFFE9E7)
-              : _theme.myBubbleGradient.first.withValues(alpha: 0.4),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (pending.image != null)
-                Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Center(
-                    child: failed
-                        ? const Icon(
-                            Icons.image_not_supported_outlined,
-                            color: Colors.white70,
-                          )
-                        : Text(
-                            '${(progress * 100).round()}%',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                  ),
-                ),
-              if (pending.image != null &&
-                  pending.text != null &&
-                  pending.text!.isNotEmpty)
-                const SizedBox(height: 6),
-              if (pending.text != null && pending.text!.isNotEmpty)
-                Text(
-                  pending.text!,
-                  style: const TextStyle(fontSize: 15, color: chatInk),
-                ),
-              if (pending.audioBase64 != null)
-                const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.mic, size: 16, color: chatInk),
-                    SizedBox(width: 6),
-                    Text('Voice message', style: TextStyle(fontSize: 15)),
-                  ],
-                ),
-              const SizedBox(height: 6),
-              if (failed)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      size: 15,
-                      color: Color(0xFFD64541),
-                    ),
-                    const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        pending.error!,
-                        style: const TextStyle(
-                          fontSize: 11.5,
-                          color: Color(0xFFD64541),
-                        ),
-                      ),
-                    ),
-                    TextButton(
-                      onPressed: () => _retryPending(pending),
-                      style: TextButton.styleFrom(
-                        minimumSize: const Size(0, 30),
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                      ),
-                      child: const Text(
-                        'Retry',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          color: chatGreen,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'Discard',
-                      visualDensity: VisualDensity.compact,
-                      iconSize: 16,
-                      icon: const Icon(Icons.close, color: Colors.black38),
-                      onPressed: () => _removePending(pending),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: chatInk.withValues(alpha: 0.55),
-                        value: uploading ? progress : null,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      uploading ? 'Uploading photo…' : 'Sending…',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: chatInk.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ],
-                ),
+    return Semantics(
+      container: true,
+      label: failed
+          ? 'Message not sent. ${pending.error ?? 'It failed'}. Use the Retry button to try again.'
+          : 'Sending message…',
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 4),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+          ),
+          decoration: BoxDecoration(
+            color: failed
+                ? const Color(0xFFFFE9E7)
+                : _theme.myBubbleGradient.first.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.06),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
             ],
           ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (pending.image != null)
+                  Container(
+                    width: 150,
+                    height: 150,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Center(
+                      child: failed
+                          ? const Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white70,
+                            )
+                          : Text(
+                              '${(progress * 100).round()}%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ),
+                if (pending.image != null &&
+                    pending.text != null &&
+                    pending.text!.isNotEmpty)
+                  const SizedBox(height: 6),
+                if (pending.text != null && pending.text!.isNotEmpty)
+                  Text(
+                    pending.text!,
+                    style: TextStyle(fontSize: 15, color: _ink),
+                  ),
+                if (pending.audioBase64 != null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.mic, size: 16, color: _ink),
+                      const SizedBox(width: 6),
+                      Text('Voice message', style: TextStyle(fontSize: 15)),
+                    ],
+                  ),
+                const SizedBox(height: 6),
+                if (failed)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.error_outline,
+                        size: 15,
+                        color: Color(0xFFD64541),
+                      ),
+                      const SizedBox(width: 6),
+                      Flexible(
+                        child: Text(
+                          pending.error!,
+                          style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Color(0xFFD64541),
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: () => _retryPending(pending),
+                        style: TextButton.styleFrom(
+                          minimumSize: const Size(0, 30),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
+                        child: const Text(
+                          'Retry',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: chatGreen,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Discard',
+                        visualDensity: VisualDensity.compact,
+                        iconSize: 16,
+                        icon: Icon(Icons.close, color: _sub),
+                        onPressed: () => _removePending(pending),
+                      ),
+                    ],
+                  )
+                else
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: _ink.withValues(alpha: 0.55),
+                          value: uploading ? progress : null,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        uploading ? 'Uploading photo…' : 'Sending…',
+                        style: TextStyle(fontSize: 11.5, color: _sub),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The message body, with the active search query highlighted so matches
+  /// are visible in the list without reading them.
+  Widget _messageText(ChatMessage message, TextStyle style) {
+    final text = message.text!;
+    final query = _searchQuery.trim();
+    if (query.isEmpty) return Text(text, style: style);
+    final lower = text.toLowerCase();
+    final q = query.toLowerCase();
+    final spans = <TextSpan>[];
+    var start = 0;
+    while (start < text.length) {
+      final index = lower.indexOf(q, start);
+      if (index < 0) break;
+      if (index > start) {
+        spans.add(TextSpan(text: text.substring(start, index)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(index, index + q.length),
+          style: TextStyle(
+            background: Paint()..color = const Color(0xFFF5E28A),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      );
+      start = index + q.length;
+    }
+    if (start < text.length) {
+      spans.add(TextSpan(text: text.substring(start)));
+    }
+    return Text.rich(TextSpan(style: style, children: spans));
+  }
+
+  /// The slim band above the list while searching: how many matched.
+  Widget _buildSearchBanner(int matches) {
+    final palette = MessagingPalette.of(context);
+    return Container(
+      width: double.infinity,
+      color: palette.card,
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Center(
+        child: Text(
+          matches == 1 ? '1 match' : '$matches matches',
+          style: TextStyle(fontSize: 12.5, color: palette.sub),
         ),
       ),
     );
@@ -2312,22 +2378,32 @@ class _ChatScreenState extends State<ChatScreen>
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          InkWell(
-                            onTap: () => _togglePlayVoiceNote(message),
-                            child: CircleAvatar(
-                              radius: 16,
-                              backgroundColor: Colors.black12,
-                              child: Icon(
-                                isPlayingVoice ? Icons.pause : Icons.play_arrow,
-                                color: chatInk,
-                                size: 20,
+                          Semantics(
+                            button: true,
+                            label: isPlayingVoice
+                                ? 'Pause voice note'
+                                : 'Play voice note',
+                            child: InkWell(
+                              onTap: () => _togglePlayVoiceNote(message),
+                              child: CircleAvatar(
+                                radius: 16,
+                                backgroundColor: Colors.black12,
+                                child: Icon(
+                                  isPlayingVoice
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
+                                  color: _ink,
+                                  size: 20,
+                                ),
                               ),
                             ),
                           ),
                           const SizedBox(width: 10),
-                          _VoiceWaveform(
-                            seed: message.id,
-                            progress: isPlayingVoice ? _voiceProgress : 0,
+                          ExcludeSemantics(
+                            child: _VoiceWaveform(
+                              seed: message.id,
+                              progress: isPlayingVoice ? _voiceProgress : 0,
+                            ),
                           ),
                           const SizedBox(width: 10),
                           Text(
@@ -2336,8 +2412,8 @@ class _ChatScreenState extends State<ChatScreen>
                                 : _voiceClock(
                                     message.audioDurationSeconds ?? 1,
                                   ),
-                            style: const TextStyle(
-                              color: chatInk,
+                            style: TextStyle(
+                              color: _ink,
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2351,15 +2427,9 @@ class _ChatScreenState extends State<ChatScreen>
                       size: 136,
                     )
                   else if (message.text != null && message.text!.isNotEmpty)
-                    Text(
-                      isSticker
-                          ? message.text!.substring('sticker:v1:'.length)
-                          : message.text!,
-                      style: TextStyle(
-                        color: chatInk,
-                        fontSize: isSticker ? 68 : 16,
-                        height: 1.3,
-                      ),
+                    _messageText(
+                      message,
+                      TextStyle(color: _ink, fontSize: 16, height: 1.3),
                     ),
                   const SizedBox(height: 4),
                   Row(
@@ -2375,17 +2445,14 @@ class _ChatScreenState extends State<ChatScreen>
                       ],
                       Text(
                         '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                          color: Colors.black54,
-                          fontSize: 10,
-                        ),
+                        style: TextStyle(color: _sub, fontSize: 10),
                       ),
                       if (message.isMe) ...[
                         const SizedBox(width: 4),
                         Icon(
                           message.isSeen ? Icons.done_all : Icons.check,
                           size: 14,
-                          color: message.isSeen ? Colors.blue : Colors.black54,
+                          color: message.isSeen ? Colors.lightBlue : _sub,
                         ),
                       ],
                     ],

@@ -133,9 +133,9 @@ class _PairingScreenState extends State<PairingScreen> {
   Widget _card({required Widget child}) => Container(
     padding: const EdgeInsets.all(16),
     decoration: BoxDecoration(
-      color: const Color(0xFFF7F8FA),
+      color: MessagingPalette.of(context).card,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: const Color(0xFFE7E9EE)),
+      border: Border.all(color: MessagingPalette.of(context).cardBorder),
     ),
     child: child,
   );
@@ -171,7 +171,7 @@ class _PairingScreenState extends State<PairingScreen> {
                 style: TextStyle(
                   fontSize: 12.5,
                   height: 1.25,
-                  color: Colors.grey[600],
+                  color: MessagingPalette.of(context).sub,
                 ),
               ),
             ],
@@ -192,12 +192,13 @@ class _PairingScreenState extends State<PairingScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final palette = MessagingPalette.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: palette.page,
       appBar: AppBar(
         title: const Text('Pair Device'),
-        backgroundColor: Colors.white,
-        foregroundColor: chatInk,
+        backgroundColor: palette.page,
+        foregroundColor: palette.ink,
         elevation: 0,
         scrolledUnderElevation: 0.5,
       ),
@@ -265,7 +266,10 @@ class _PairingScreenState extends State<PairingScreen> {
                 Text(
                   'Share this code — your partner enters it on their phone.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey[600]),
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    color: MessagingPalette.of(context).sub,
+                  ),
                 ),
 
                 // OR
@@ -273,20 +277,28 @@ class _PairingScreenState extends State<PairingScreen> {
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   child: Row(
                     children: [
-                      Expanded(child: Divider(color: Colors.grey[300])),
+                      Expanded(
+                        child: Divider(
+                          color: MessagingPalette.of(context).cardBorder,
+                        ),
+                      ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 14),
                         child: Text(
                           'OR',
                           style: TextStyle(
-                            color: Colors.grey[600],
+                            color: MessagingPalette.of(context).sub,
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
                             letterSpacing: 1.2,
                           ),
                         ),
                       ),
-                      Expanded(child: Divider(color: Colors.grey[300])),
+                      Expanded(
+                        child: Divider(
+                          color: MessagingPalette.of(context).cardBorder,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -307,11 +319,11 @@ class _PairingScreenState extends State<PairingScreen> {
                         textAlign: TextAlign.center,
                         maxLength: 6,
                         textCapitalization: TextCapitalization.characters,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           letterSpacing: 6,
                           fontWeight: FontWeight.bold,
-                          color: chatInk,
+                          color: MessagingPalette.of(context).ink,
                         ),
                         decoration: InputDecoration(
                           hintText: 'CODE',
@@ -319,17 +331,19 @@ class _PairingScreenState extends State<PairingScreen> {
                           contentPadding: const EdgeInsets.symmetric(
                             vertical: 14,
                           ),
-                          hintStyle: TextStyle(color: Colors.grey[400]),
+                          hintStyle: TextStyle(
+                            color: MessagingPalette.of(context).sub,
+                          ),
                           filled: true,
-                          fillColor: Colors.white,
+                          fillColor: MessagingPalette.of(context).fieldFill,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
                             borderSide: BorderSide.none,
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(14),
-                            borderSide: const BorderSide(
-                              color: Color(0xFFE7E9EE),
+                            borderSide: BorderSide(
+                              color: MessagingPalette.of(context).fieldBorder,
                             ),
                           ),
                           focusedBorder: OutlineInputBorder(

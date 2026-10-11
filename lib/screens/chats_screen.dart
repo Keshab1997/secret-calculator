@@ -273,8 +273,9 @@ class _ChatsScreenState extends State<ChatsScreen>
         a['message']['timestamp'] as int,
       ),
     );
+    final palette = MessagingPalette.of(context);
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: palette.page,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(
@@ -283,8 +284,10 @@ class _ChatsScreenState extends State<ChatsScreen>
               : _tab == 1
               ? 'Calls'
               : 'You',
-          style: const TextStyle(
-            color: Color(0xFF168B53),
+          style: TextStyle(
+            color: MessagingPalette.isDark(context)
+                ? const Color(0xFF25D366)
+                : const Color(0xFF168B53),
             fontWeight: FontWeight.bold,
             fontSize: 28,
           ),
@@ -409,7 +412,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                                               fontSize: 11,
                                               color: unread > 0
                                                   ? chatGreen
-                                                  : Colors.grey,
+                                                  : palette.sub,
                                             ),
                                           ),
                                           const SizedBox(height: 5),
@@ -516,8 +519,10 @@ class _ChatsScreenState extends State<ChatsScreen>
           : null,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        backgroundColor: Colors.white,
-        indicatorColor: const Color(0xFFD9FDD3),
+        backgroundColor: palette.page,
+        indicatorColor: MessagingPalette.isDark(context)
+            ? const Color(0xFF2A3942)
+            : const Color(0xFFD9FDD3),
         onDestinationSelected: (index) {
           if (index != _tab) HapticFeedback.selectionClick();
           setState(() => _tab = index);
@@ -602,7 +607,7 @@ class _ChatsScreenState extends State<ChatsScreen>
             subtitle,
             textAlign: TextAlign.center,
             style: TextStyle(
-              color: Colors.grey[600],
+              color: MessagingPalette.of(context).sub,
               fontSize: 13.5,
               height: 1.35,
             ),

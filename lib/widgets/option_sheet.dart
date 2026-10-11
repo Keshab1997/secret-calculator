@@ -34,7 +34,7 @@ Future<String?> showOptionSheet(
 }) {
   return showModalBottomSheet<String>(
     context: context,
-    backgroundColor: Colors.white,
+    backgroundColor: MessagingPalette.of(context).page,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
@@ -50,7 +50,9 @@ Future<String?> showOptionSheet(
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.black12,
+                color: MessagingPalette.isDark(context)
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Colors.black12,
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -68,7 +70,9 @@ Future<String?> showOptionSheet(
                     Text(
                       subtitle,
                       style: Theme.of(sheetContext).textTheme.bodySmall
-                          ?.copyWith(color: Colors.grey[600]),
+                          ?.copyWith(
+                            color: MessagingPalette.of(sheetContext).sub,
+                          ),
                     ),
                   ],
                 ],
@@ -128,21 +132,28 @@ class _OptionTile extends StatelessWidget {
                 children: [
                   Text(
                     item.label,
-                    style: Theme.of(context).textTheme.titleMedium
-                        ?.copyWith(color: item.destructive ? tint : chatInk),
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      color: item.destructive
+                          ? tint
+                          : MessagingPalette.of(context).ink,
+                    ),
                   ),
                   if (item.subtitle != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       item.subtitle!,
                       style: Theme.of(context).textTheme.bodySmall
-                          ?.copyWith(color: Colors.grey[600]),
+                          ?.copyWith(color: MessagingPalette.of(context).sub),
                     ),
                   ],
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, size: 20, color: Colors.grey[400]),
+            Icon(
+              Icons.chevron_right,
+              size: 20,
+              color: MessagingPalette.of(context).sub,
+            ),
           ],
         ),
       ),

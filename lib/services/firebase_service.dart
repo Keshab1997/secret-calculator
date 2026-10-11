@@ -8,6 +8,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'encryption_service.dart';
@@ -70,6 +71,10 @@ class FirebaseService {
   String? _decoyPasscode;
   bool _biometricEnabled = false;
   int? _disappearingSeconds;
+  ThemeMode _themeMode = ThemeMode.system;
+  final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
+    ThemeMode.system,
+  );
   final EncryptionService _encryption = EncryptionService();
 
   /// When set, the next [sendMessage] throws this instead of writing: the
@@ -98,6 +103,14 @@ class FirebaseService {
 
   /// Disappearing-message timer for new messages; null = off.
   int? get disappearingSeconds => _disappearingSeconds;
+
+  /// How the messaging side should render: follow the system, or force
+  /// light/dark. The calculator face stays dark either way.
+  ThemeMode get themeMode => _themeMode;
+
+  /// Live view of [themeMode] so the root of the app can re-skin itself the
+  /// moment the user flips it, without any plumbing through the tree.
+  ValueListenable<ThemeMode> get themeModeChanged => themeModeNotifier;
 
   FirebaseDatabase get _db {
     final db = FirebaseDatabase.instanceFor(
@@ -212,6 +225,16 @@ class FirebaseService {
         if (savedDisappearing is int) {
           _disappearingSeconds = savedDisappearing;
         }
+        final savedDark = decoded['darkMode'];
+        switch (savedDark) {
+          case 'light':
+            _themeMode = ThemeMode.light;
+          case 'dark':
+            _themeMode = ThemeMode.dark;
+          default:
+            _themeMode = ThemeMode.system;
+        }
+        themeModeNotifier.value = _themeMode;
         final rooms = decoded['pairedRooms'];
         if (rooms is Map) {
           for (final entry in rooms.entries) {
@@ -267,12 +290,20 @@ class FirebaseService {
           'decoyPasscode': _decoyPasscode,
           'biometricEnabled': _biometricEnabled,
           'disappearingSeconds': _disappearingSeconds,
+          'darkMode': _themeMode.name,
         }),
       );
     } catch (_) {
       if (strict) rethrow;
       // Legacy settings remain best-effort in restricted environments.
     }
+  }
+
+  /// Switches the messaging side between system / light / dark.
+  Future<void> setThemeMode(ThemeMode mode) async {
+    _themeMode = mode;
+    themeModeNotifier.value = mode;
+    await _saveState();
   }
 
   /// Updates and persists a custom calculator passcode (4–8 digits).

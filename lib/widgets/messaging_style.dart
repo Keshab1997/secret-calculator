@@ -5,6 +5,70 @@ import '../services/media_cache_service.dart';
 const chatGreen = Color(0xFF1DAA61);
 const chatInk = Color(0xFF172126);
 
+/// Dark-mode counterparts of the chat ink, so surfaces can resolve one
+/// logical colour against the active theme instead of guessing.
+const chatInkDark = Color(0xFFE9EDEF);
+const chatSubDark = Color(0xFF8696A0);
+
+/// Semantic colours for the messaging surfaces, resolved against the active
+/// theme. Every screen reads these instead of hard-coding white and grey,
+/// which is what makes dark mode a flip, not a re-skin.
+class MessagingPalette {
+  const MessagingPalette._({
+    required this.page,
+    required this.card,
+    required this.cardBorder,
+    required this.ink,
+    required this.sub,
+    required this.fieldFill,
+    required this.fieldBorder,
+  });
+
+  /// Page background (scaffold, list, sheets).
+  final Color page;
+
+  /// Raised card surface (profile cards, tiles).
+  final Color card;
+  final Color cardBorder;
+
+  /// Primary text.
+  final Color ink;
+
+  /// Secondary text (captions, hints, timestamps).
+  final Color sub;
+
+  /// Text field fill + border.
+  final Color fieldFill;
+  final Color fieldBorder;
+
+  static const MessagingPalette light = MessagingPalette._(
+    page: Colors.white,
+    card: Color(0xFFF7F8FA),
+    cardBorder: Color(0xFFE7E9EE),
+    ink: chatInk,
+    sub: Color(0xFF8A919E),
+    fieldFill: Colors.white,
+    fieldBorder: Color(0xFFE7E9EE),
+  );
+
+  static const MessagingPalette dark = MessagingPalette._(
+    page: Color(0xFF0B141A),
+    card: Color(0xFF1F2C33),
+    cardBorder: Color(0xFF2A3942),
+    ink: chatInkDark,
+    sub: chatSubDark,
+    fieldFill: Color(0xFF111B21),
+    fieldBorder: Color(0xFF2A3942),
+  );
+
+  static MessagingPalette of(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark ? dark : light;
+
+  /// True when the active theme is the dark one.
+  static bool isDark(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark;
+}
+
 /// The app's type family. Bundled (see pubspec.yaml) so it is identical on
 /// every device and available on the first frame; every ThemeData in the app
 /// spreads this name so the calculator and the hidden side share one voice.
@@ -85,6 +149,56 @@ final messagingTheme = ThemeData(
   ),
 );
 
+/// The dark variant of the messaging theme — WhatsApp's night palette:
+/// near-black background, elevated surfaces, one green accent. The light and
+/// dark themes share the type scale and the dialog/snackbar shape language,
+/// so switching modes changes the mood, not the app.
+final messagingDarkTheme = ThemeData(
+  useMaterial3: true,
+  fontFamily: appFontFamily,
+  colorScheme: ColorScheme.fromSeed(
+    seedColor: chatGreen,
+    brightness: Brightness.dark,
+  ).copyWith(surface: const Color(0xFF111B21)),
+  textTheme: messagingTextTheme.apply(fontFamily: appFontFamily),
+  scaffoldBackgroundColor: const Color(0xFF0B141A),
+  appBarTheme: const AppBarTheme(
+    backgroundColor: Color(0xFF111B21),
+    foregroundColor: Color(0xFFE9EDEF),
+    surfaceTintColor: Colors.transparent,
+    elevation: 0,
+    scrolledUnderElevation: 0.5,
+  ),
+  dialogTheme: DialogThemeData(
+    backgroundColor: const Color(0xFF1F2C33),
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    titleTextStyle: const TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 17.5,
+      fontWeight: FontWeight.w600,
+      color: Color(0xFFE9EDEF),
+    ),
+    contentTextStyle: const TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 14.5,
+      height: 1.35,
+      color: Color(0xFFCFD6DC),
+    ),
+  ),
+  snackBarTheme: SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    backgroundColor: Color(0xFF676E75),
+    contentTextStyle: TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 14,
+      color: Colors.white,
+    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    insetPadding: EdgeInsets.fromLTRB(16, 0, 16, 16),
+  ),
+);
+
 /// A messaging route: fade through with a small rise instead of the platform
 /// push. The default push swings the whole page sideways, which reads as
 /// abrupt next to the rest of this side of the app — here the page settles
@@ -92,7 +206,9 @@ final messagingTheme = ThemeData(
 PageRoute<T> messagingRoute<T>(Widget child) => PageRouteBuilder<T>(
   transitionDuration: const Duration(milliseconds: 240),
   reverseTransitionDuration: const Duration(milliseconds: 200),
-  pageBuilder: (_, _, _) => Theme(data: messagingTheme, child: child),
+  // The app-level theme (light or dark, per the user's preference) cascades
+  // through this route; forcing one here would pin the side to light.
+  pageBuilder: (_, _, _) => child,
   transitionsBuilder: (_, animation, _, child) {
     final curved = CurvedAnimation(
       parent: animation,
@@ -187,10 +303,14 @@ class ProfileAvatar extends StatelessWidget {
 
 /// Original line-art wallpaper, drawn locally with no remote image requests.
 class ChatWallpaper extends CustomPainter {
+  final Color line;
+
+  const ChatWallpaper({this.line = const Color(0xFFE4DED2)});
+
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFFE4DED2)
+      ..color = line
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
     for (double y = -30; y < size.height + 90; y += 90) {
@@ -244,5 +364,6 @@ class ChatWallpaper extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant ChatWallpaper oldDelegate) => false;
+  bool shouldRepaint(covariant ChatWallpaper oldDelegate) =>
+      line != oldDelegate.line;
 }
