@@ -75,6 +75,10 @@ class FirebaseService {
   final ValueNotifier<ThemeMode> themeModeNotifier = ValueNotifier(
     ThemeMode.system,
   );
+  String _callAlert = 'sound';
+  final ValueNotifier<String> callAlertNotifier = ValueNotifier<String>(
+    'sound',
+  );
   final EncryptionService _encryption = EncryptionService();
 
   /// When set, the next [sendMessage] throws this instead of writing: the
@@ -111,6 +115,13 @@ class FirebaseService {
   /// Live view of [themeMode] so the root of the app can re-skin itself the
   /// moment the user flips it, without any plumbing through the tree.
   ValueListenable<ThemeMode> get themeModeChanged => themeModeNotifier;
+
+  /// How an incoming call alerts this phone: 'sound' (ringtone + vibration,
+  /// the default), 'vibrate' (vibration only) or 'silent' (nothing).
+  String get callAlert => _callAlert;
+
+  /// Live view of [callAlert] for settings UI.
+  ValueListenable<String> get callAlertChanged => callAlertNotifier;
 
   FirebaseDatabase get _db {
     final db = FirebaseDatabase.instanceFor(
@@ -235,6 +246,13 @@ class FirebaseService {
             _themeMode = ThemeMode.system;
         }
         themeModeNotifier.value = _themeMode;
+        final savedAlert = decoded['callAlert'];
+        if (savedAlert == 'sound' ||
+            savedAlert == 'vibrate' ||
+            savedAlert == 'silent') {
+          _callAlert = savedAlert as String;
+        }
+        callAlertNotifier.value = _callAlert;
         final rooms = decoded['pairedRooms'];
         if (rooms is Map) {
           for (final entry in rooms.entries) {
@@ -291,6 +309,7 @@ class FirebaseService {
           'biometricEnabled': _biometricEnabled,
           'disappearingSeconds': _disappearingSeconds,
           'darkMode': _themeMode.name,
+          'callAlert': _callAlert,
         }),
       );
     } catch (_) {
@@ -303,6 +322,15 @@ class FirebaseService {
   Future<void> setThemeMode(ThemeMode mode) async {
     _themeMode = mode;
     themeModeNotifier.value = mode;
+    await _saveState();
+  }
+
+  /// Sets how incoming calls alert this phone: 'sound', 'vibrate' or
+  /// 'silent'. Unknown values are ignored.
+  Future<void> setCallAlert(String mode) async {
+    if (mode != 'sound' && mode != 'vibrate' && mode != 'silent') return;
+    _callAlert = mode;
+    callAlertNotifier.value = mode;
     await _saveState();
   }
 

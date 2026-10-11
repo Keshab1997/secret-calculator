@@ -248,6 +248,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (mounted) setState(() {});
   }
 
+  String _callAlertLabel() {
+    return switch (FirebaseService().callAlert) {
+      'vibrate' => 'Vibrate only',
+      'silent' => 'Silent',
+      _ => 'Sound + vibrate',
+    };
+  }
+
+  Future<void> _showCallAlertOptions() async {
+    final current = FirebaseService().callAlert;
+    final choice = await showOptionSheet(
+      context,
+      title: 'Incoming call alert',
+      subtitle: 'How your phone alerts you when a call comes in',
+      items: [
+        OptionSheetItem(
+          value: 'sound',
+          icon: Icons.notifications_active_outlined,
+          label: 'Sound',
+          subtitle: current == 'sound' ? 'In use' : 'Ringtone + vibration',
+        ),
+        OptionSheetItem(
+          value: 'vibrate',
+          icon: Icons.vibration_outlined,
+          label: 'Vibrate',
+          subtitle: current == 'vibrate'
+              ? 'In use'
+              : 'Vibration only, no sound',
+        ),
+        OptionSheetItem(
+          value: 'silent',
+          icon: Icons.notifications_off_outlined,
+          label: 'Silent',
+          subtitle: current == 'silent' ? 'In use' : 'No sound, no vibration',
+        ),
+      ],
+    );
+    if (choice == null || !mounted) return;
+    await FirebaseService().setCallAlert(choice);
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
     padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
@@ -318,6 +360,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 title: 'Dark mode',
                 subtitle: _darkModeLabel(),
                 onTap: _saving ? () {} : _showDarkModeOptions,
+              ),
+              const Divider(height: 20),
+              _tile(
+                icon: Icons.vibration_outlined,
+                title: 'Incoming call alert',
+                subtitle: _callAlertLabel(),
+                onTap: _saving ? () {} : _showCallAlertOptions,
               ),
               TextField(
                 controller: _decoyCode,

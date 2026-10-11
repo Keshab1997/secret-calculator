@@ -61,9 +61,14 @@ class NativeBridgeService {
   }
 
   /// Plays the device's default ringtone (looping) for an incoming call.
-  Future<void> startRingtone() async {
+  ///
+  /// [mode] is the user's call-alert preference: 'sound' plays the ringtone
+  /// plus a repeating vibration (the default), 'vibrate' vibrates without
+  /// any audio, and 'silent' does neither — the call simply appears on
+  /// screen.
+  Future<void> startRingtone({String mode = 'sound'}) async {
     try {
-      await _channel.invokeMethod('startRingtone');
+      await _channel.invokeMethod('startRingtone', {'mode': mode});
     } catch (_) {
       // Fail silently when the platform channel is unavailable (e.g. tests).
     }

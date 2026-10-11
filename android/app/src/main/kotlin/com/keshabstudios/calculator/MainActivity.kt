@@ -66,7 +66,10 @@ class MainActivity : FlutterFragmentActivity() {
                         }
                         result.success(true)
                     }
-                    "startRingtone" -> startRingtone(result)
+                    "startRingtone" -> startRingtone(
+                        result,
+                        call.argument<String>("mode") ?: "sound"
+                    )
                     "stopRingtone" -> {
                         stopRingtoneInternal()
                         result.success(true)
@@ -182,24 +185,33 @@ class MainActivity : FlutterFragmentActivity() {
         mediaPlayer = null
     }
 
-    private fun startRingtone(result: MethodChannel.Result) {
+    private fun startRingtone(result: MethodChannel.Result, mode: String) {
         try {
             stopRingtoneInternal()
-            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
-            val player = MediaPlayer()
-            player.setDataSource(this, uri)
-            player.setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            player.isLooping = true
-            player.prepare()
-            player.start()
-            ringtonePlayer = player
-            startRingVibration()
+            when (mode) {
+                // Alert with vibration only — the call appears quietly on
+                // screen, no audio.
+                "vibrate" -> startRingVibration()
+                // Fully quiet: neither audio nor vibration.
+                "silent" -> Unit
+                else -> {
+                    val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                        ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+                    val player = MediaPlayer()
+                    player.setDataSource(this, uri)
+                    player.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    player.isLooping = true
+                    player.prepare()
+                    player.start()
+                    ringtonePlayer = player
+                    startRingVibration()
+                }
+            }
             result.success(true)
         } catch (e: Exception) {
             stopRingtoneInternal()

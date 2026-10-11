@@ -129,8 +129,9 @@ class _CallScreenState extends State<CallScreen>
     // null snapshot right away means the caller already cancelled.
     _hasSeenCallNode = widget.isIncoming;
     if (widget.isIncoming) {
-      // Ring on this phone until accepted, declined or disposed.
-      _native.startRingtone();
+      // Ring on this phone until accepted, declined or disposed — in the
+      // alert mode the user chose (sound, vibrate-only or fully silent).
+      _native.startRingtone(mode: _firebase.callAlert);
     }
     _ringPulse = AnimationController(
       vsync: this,
