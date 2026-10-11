@@ -28,6 +28,31 @@ void main() {
     );
   });
 
+  testWidgets('phone sticker grid has more spacing and no overflow', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: StickerKeyboard(onStickerSelected: (_) {})),
+      ),
+    );
+    await tester.pump();
+
+    final grid = tester.widget<GridView>(find.byType(GridView));
+    final delegate =
+        grid.gridDelegate as SliverGridDelegateWithFixedCrossAxisCount;
+    expect(delegate.crossAxisCount, 3);
+    expect(delegate.crossAxisSpacing, 12);
+    expect(delegate.mainAxisSpacing, 12);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('rose and teddy artwork can be sent from the love pack', (
     tester,
   ) async {
