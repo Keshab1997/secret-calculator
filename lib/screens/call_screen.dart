@@ -56,6 +56,15 @@ class _CallScreenState extends State<CallScreen> {
   /// it either way (see [_onRingTimeout]).
   static const Duration ringTimeout = Duration(seconds: 60);
 
+  /// WhatsApp-style call palette: the near-black chat background with a faint
+  /// green glow, glass control buttons, WhatsApp green for accept and a soft
+  /// red for end/decline.
+  static const Color _callBackground = Color(0xFF0B141A);
+  static const Color _callGlow = Color(0xFF12332C);
+  static const Color _acceptGreen = Color(0xFF25D366);
+  static const Color _endRed = Color(0xFFE5484D);
+  static const Color _glassBorder = Color(0x1FFFFFFF);
+
   /// 720p@30 capture target. Android already defaults to 1280x720, but the
   /// native parsers take plain numbers (their `ideal`-map handling is
   /// broken) and fall back to the closest camera format, so this pins the
@@ -622,42 +631,36 @@ class _CallScreenState extends State<CallScreen> {
     return '$minutes:$seconds';
   }
 
+  /// The avatar shown while there is no video to show: the app's gradient in
+  /// a ringed circle, WhatsApp-large and dead centre.
   Widget _buildAvatarStage() {
     return Container(
-      width: widget.isVideo ? 240 : 150,
-      height: widget.isVideo ? 300 : 150,
+      width: 150,
+      height: 150,
+      alignment: Alignment.center,
       decoration: BoxDecoration(
-        shape: widget.isVideo ? BoxShape.rectangle : BoxShape.circle,
-        borderRadius: widget.isVideo ? BorderRadius.circular(28) : null,
+        shape: BoxShape.circle,
         gradient: const LinearGradient(
           colors: [Color(0xFF6A3DE8), Color(0xFF9B4DFF)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.14),
+          width: 1.5,
+        ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6A3DE8).withValues(alpha: 0.45),
-            blurRadius: 32,
-            spreadRadius: 6,
+            color: const Color(0xFF6A3DE8).withValues(alpha: 0.35),
+            blurRadius: 40,
+            spreadRadius: 2,
           ),
         ],
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            widget.isVideo ? Icons.videocam : Icons.person,
-            size: 64,
-            color: Colors.white,
-          ),
-          if (widget.isVideo) ...[
-            const SizedBox(height: 12),
-            Text(
-              _callStatus == 'connected' ? 'Live P2P Stream' : 'Camera Ready',
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-          ],
-        ],
+      child: Icon(
+        widget.isVideo ? Icons.videocam : Icons.person,
+        size: 62,
+        color: Colors.white,
       ),
     );
   }
@@ -674,18 +677,28 @@ class _CallScreenState extends State<CallScreen> {
           ),
           if (_localStream != null)
             Positioned(
-              // Below the floating header (lock row + name + timer).
-              top: MediaQuery.of(context).padding.top + 124,
+              // Below the floating header (name + timer), WhatsApp's small
+              // self-view tile.
+              top: MediaQuery.of(context).padding.top + 96,
               right: 12,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: SizedBox(
-                  width: 104,
-                  height: 148,
-                  child: RTCVideoView(
-                    _localRenderer,
-                    mirror: true,
-                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: SizedBox(
+                    width: 104,
+                    height: 148,
+                    child: RTCVideoView(
+                      _localRenderer,
+                      mirror: true,
+                      objectFit:
+                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                    ),
                   ),
                 ),
               ),
@@ -711,7 +724,11 @@ class _CallScreenState extends State<CallScreen> {
     final isRingingIncoming = widget.isIncoming && _callStatus == 'ringing';
     final statusLabel = _callStatus == 'connected'
         ? _formatDuration(_elapsedSeconds)
-        : (isRingingIncoming ? 'Incoming Encrypted Call...' : 'Ringing...');
+        : (isRingingIncoming
+              ? (widget.isVideo
+                    ? 'Incoming video call...'
+                    : 'Incoming voice call...')
+              : 'Ringing...');
 
     if (widget.isVideo) {
       return _buildVideoLayout(statusLabel, isRingingIncoming);
@@ -719,11 +736,11 @@ class _CallScreenState extends State<CallScreen> {
     return _buildVoiceLayout(statusLabel, isRingingIncoming);
   }
 
-  /// WhatsApp-style: video fills the whole screen and the header, timer and
-  /// controls float on top of it behind gradient scrims.
+  /// WhatsApp-style: video fills the whole screen, and only the name, the
+  /// timer and the glass controls float on top of it behind gradient scrims.
   Widget _buildVideoLayout(String statusLabel, bool isRingingIncoming) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0914),
+      backgroundColor: _callBackground,
       body: Stack(
         children: [
           Positioned.fill(child: _buildVideoStage()),
@@ -737,38 +754,33 @@ class _CallScreenState extends State<CallScreen> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [Color(0xB3000000), Color(0x00000000)],
+                  colors: [Color(0xCC000000), Color(0x00000000)],
                 ),
               ),
               child: SafeArea(
                 bottom: false,
                 child: Padding(
-                  padding: const EdgeInsets.only(top: 8, bottom: 26),
+                  padding: const EdgeInsets.only(top: 10, bottom: 24),
                   child: Column(
                     children: [
-                      _buildTypeRow(),
-                      const SizedBox(height: 10),
                       Text(
                         _partnerName,
                         style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w600,
                           shadows: [
                             Shadow(blurRadius: 8, color: Colors.black54),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 3),
                       Text(
                         statusLabel,
-                        style: TextStyle(
-                          color: _callStatus == 'connected'
-                              ? Colors.greenAccent
-                              : Colors.amberAccent,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w500,
-                          shadows: const [
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                          shadows: [
                             Shadow(blurRadius: 8, color: Colors.black54),
                           ],
                         ),
@@ -813,73 +825,75 @@ class _CallScreenState extends State<CallScreen> {
     );
   }
 
+  /// WhatsApp-style voice call: name and status at the top, the avatar in the
+  /// middle, glass controls pinned to the bottom.
   Widget _buildVoiceLayout(String statusLabel, bool isRingingIncoming) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0914),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Top bar
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: _buildTypeRow(),
-            ),
-
-            const Spacer(),
-
-            // Avatar stage
-            _buildAvatarStage(),
-
-            const SizedBox(height: 28),
-            Text(
-              _partnerName,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 26,
-                fontWeight: FontWeight.bold,
+      backgroundColor: _callBackground,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: RadialGradient(
+            center: Alignment(0, -0.35),
+            radius: 1.1,
+            colors: [_callGlow, _callBackground],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              const SizedBox(height: 14),
+              _buildEncryptionRow(),
+              const SizedBox(height: 18),
+              Text(
+                _partnerName,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              statusLabel,
-              style: TextStyle(
-                color: _callStatus == 'connected'
-                    ? Colors.greenAccent
-                    : Colors.amberAccent,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
+              const SizedBox(height: 6),
+              Text(
+                statusLabel,
+                style: const TextStyle(color: Colors.white60, fontSize: 15),
               ),
-            ),
 
-            const Spacer(),
+              const Spacer(),
 
-            // Call controls
-            Padding(
-              padding: const EdgeInsets.only(bottom: 40, left: 24, right: 24),
-              child: isRingingIncoming
-                  ? _buildRingControls()
-                  : _buildActiveControls(),
-            ),
-          ],
+              _buildAvatarStage(),
+
+              const Spacer(),
+
+              // Call controls
+              Padding(
+                padding: const EdgeInsets.only(bottom: 44, left: 24, right: 24),
+                child: isRingingIncoming
+                    ? _buildRingControls()
+                    : _buildActiveControls(),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildTypeRow() {
-    return Row(
+  /// The one piece of the old header worth keeping: this call really is
+  /// peer-to-peer and end-to-end encrypted, said quietly.
+  Widget _buildEncryptionRow() {
+    return const Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Icon(Icons.lock_outline, size: 16, color: Colors.greenAccent),
-        const SizedBox(width: 6),
+        Icon(Icons.lock_outline, size: 13, color: Colors.white38),
+        SizedBox(width: 6),
         Text(
-          widget.isVideo
-              ? 'Peer-to-Peer Video Call'
-              : 'Peer-to-Peer Voice Call',
-          style: const TextStyle(
-            color: Colors.white70,
-            fontSize: 13,
+          'End-to-end encrypted',
+          style: TextStyle(
+            color: Colors.white38,
+            fontSize: 12.5,
             fontWeight: FontWeight.w500,
+            letterSpacing: 0.2,
           ),
         ),
       ],
@@ -892,14 +906,14 @@ class _CallScreenState extends State<CallScreen> {
       children: [
         _buildCallActionButton(
           icon: Icons.call_end,
-          label: 'Decline',
-          color: Colors.redAccent,
+          tooltip: 'Decline',
+          background: _endRed,
           onTap: _endCall,
         ),
         _buildCallActionButton(
           icon: Icons.call,
-          label: 'Accept',
-          color: Colors.green,
+          tooltip: 'Accept',
+          background: _acceptGreen,
           onTap: _acceptIncomingCall,
         ),
       ],
@@ -912,58 +926,73 @@ class _CallScreenState extends State<CallScreen> {
       children: [
         _buildCallActionButton(
           icon: _isMuted ? Icons.mic_off : Icons.mic,
-          label: _isMuted ? 'Unmute' : 'Mute',
-          color: _isMuted ? Colors.orangeAccent : Colors.white12,
+          tooltip: _isMuted ? 'Unmute' : 'Mute',
+          active: _isMuted,
           onTap: _toggleMute,
         ),
         if (widget.isVideo)
           _buildCallActionButton(
             icon: _isCameraOff ? Icons.videocam_off : Icons.videocam,
-            label: _isCameraOff ? 'Cam Off' : 'Camera',
-            color: _isCameraOff ? Colors.redAccent : Colors.white12,
+            tooltip: _isCameraOff ? 'Turn camera on' : 'Turn camera off',
+            active: _isCameraOff,
             onTap: _toggleCamera,
           ),
         _buildCallActionButton(
           icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
-          label: 'Speaker',
-          color: _isSpeakerOn ? Colors.blueAccent : Colors.white12,
+          tooltip: _isSpeakerOn ? 'Speaker off' : 'Speaker on',
+          active: _isSpeakerOn,
           onTap: _toggleSpeaker,
         ),
         _buildCallActionButton(
           icon: Icons.call_end,
-          label: 'End',
-          color: Colors.redAccent,
+          tooltip: 'End call',
+          background: _endRed,
           onTap: _endCall,
         ),
       ],
     );
   }
 
+  /// One control button, WhatsApp-style: icon only. A toggled-on control
+  /// (mute, speaker, camera off) renders as a filled white circle with a dark
+  /// glyph so its state is unmistakable; the coloured actions (accept, end,
+  /// decline) pass a [background] instead. The label lives in the tooltip and
+  /// in the semantics, so screen readers still say what the button does.
   Widget _buildCallActionButton({
     required IconData icon,
-    required String label,
-    required Color color,
+    required String tooltip,
     required VoidCallback onTap,
+    bool active = false,
+    Color? background,
   }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        InkWell(
+    final fill =
+        background ??
+        (active ? Colors.white : Colors.white.withValues(alpha: 0.12));
+    final glyph = background != null
+        ? Colors.white
+        : (active ? _callBackground : Colors.white);
+    return Semantics(
+      label: tooltip,
+      button: true,
+      child: Tooltip(
+        message: tooltip,
+        child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(36),
+          customBorder: const CircleBorder(),
           child: Container(
             width: 64,
             height: 64,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-            child: Icon(icon, color: Colors.white, size: 28),
+            decoration: BoxDecoration(
+              color: fill,
+              shape: BoxShape.circle,
+              border: background != null || active
+                  ? null
+                  : Border.all(color: _glassBorder),
+            ),
+            child: Icon(icon, color: glyph, size: 28),
           ),
         ),
-        const SizedBox(height: 8),
-        Text(
-          label,
-          style: const TextStyle(color: Colors.white70, fontSize: 12),
-        ),
-      ],
+      ),
     );
   }
 }
