@@ -4,6 +4,7 @@ import 'dart:math';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 
@@ -197,11 +198,72 @@ class FirebaseService {
   /// Unpairs the current room so the user can pair with a new code.
   Future<void> leaveRoom() async {
     await updateOnlineStatus(false);
+    if (_roomId != null && Firebase.apps.isNotEmpty) {
+      try {
+        await _db
+            .ref()
+            .child('rooms')
+            .child(_roomId!)
+            .child('tokens')
+            .child(_peerId)
+            .remove();
+      } catch (_) {
+        // Best effort — stale tokens are also dropped by the Cloud Function.
+      }
+    }
     _roomId = null;
     _chatRef = null;
     _isPaired = false;
     _encryption.resetKey();
     await _saveState();
+  }
+
+  bool _fcmRefreshRegistered = false;
+
+  /// Publishes this device's FCM token at `rooms/{roomId}/tokens/{peerId}`
+  /// so the `onNewMessage` Cloud Function can push a disguised Calculator
+  /// notification to the partner even when this app is closed.
+  ///
+  /// Failures are swallowed: local notifications still cover the case where
+  /// the app is open or backgrounded.
+  Future<void> registerFcmToken() async {
+    if (_roomId == null || Firebase.apps.isEmpty) return;
+    try {
+      final messaging = FirebaseMessaging.instance;
+      try {
+        await messaging.requestPermission();
+      } catch (_) {
+        // Platforms without the notification permission prompt.
+      }
+      final token = await messaging.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _db
+            .ref()
+            .child('rooms')
+            .child(_roomId!)
+            .child('tokens')
+            .child(_peerId)
+            .set(token);
+      }
+      if (!_fcmRefreshRegistered) {
+        _fcmRefreshRegistered = true;
+        messaging.onTokenRefresh.listen((fresh) async {
+          final room = _roomId;
+          if (room == null || fresh.isEmpty) return;
+          try {
+            await _db
+                .ref()
+                .child('rooms')
+                .child(room)
+                .child('tokens')
+                .child(_peerId)
+                .set(fresh);
+          } catch (_) {}
+        });
+      }
+    } catch (_) {
+      // FCM unavailable (unit tests, missing google-services.json).
+    }
   }
 
   // Create a room and return the 6-character room code.
@@ -221,6 +283,7 @@ class FirebaseService {
     _isPaired = false;
     _encryption.setRoomKey(code);
     _chatRef = roomRef.child('messages');
+    await registerFcmToken();
     return code;
   }
 
@@ -250,6 +313,7 @@ class FirebaseService {
       'joinedAt': ServerValue.timestamp,
     });
     await _saveState();
+    await registerFcmToken();
 
     return true;
   }

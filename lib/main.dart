@@ -10,6 +10,8 @@ void main() async {
   await Firebase.initializeApp();
   await FirebaseService().loadSavedState();
   await NotificationService().initialize();
+  // Fire-and-forget: publishes the FCM token for closed-app notifications.
+  FirebaseService().registerFcmToken();
   runApp(const CalculatorApp());
 }
 

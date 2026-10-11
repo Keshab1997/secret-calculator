@@ -59,3 +59,8 @@ key.properties
 
 # Agent pack artifacts (tool/see_screen.py output) - never commit screenshots
 .agent-screens/
+
+# Firebase Functions
+/functions/lib/
+/functions/node_modules/
+/functions/.firebase/

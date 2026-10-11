@@ -4,5 +4,9 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "functions": {
+    "runtime": "nodejs20",
+    "source": "./functions"
   }
 }
