@@ -429,7 +429,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   Widget _display() => Padding(
-    padding: const EdgeInsets.fromLTRB(24, 12, 24, 18),
+    padding: const EdgeInsets.fromLTRB(16, 12, 16, 18),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisAlignment: MainAxisAlignment.end,
@@ -615,13 +615,14 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             }
             final keypadHeight = math.min(440.0, constraints.maxHeight * .63);
             return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(child: _display()),
                 const Divider(
                   height: 1,
                   color: Color(0xFF303030),
-                  indent: 24,
-                  endIndent: 24,
+                  indent: 16,
+                  endIndent: 16,
                 ),
                 SizedBox(height: keypadHeight, child: _keypad()),
               ],

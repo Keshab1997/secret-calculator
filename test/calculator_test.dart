@@ -362,6 +362,28 @@ void main() {
     expect(result.data, '55');
     expect(result.style!.color, Colors.white);
   });
+  testWidgets(
+    'short result aligns with keypad edge instead of shrinking the display',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(home: CalculatorScreen(historyStore: MemoryHistory())),
+      );
+      await tapKeys(tester, '7+5=');
+      final result = tester.getRect(
+        find.byKey(const ValueKey('calculator-result')),
+      );
+      final equals = tester.getRect(
+        find.byKey(const ValueKey('calculator-key-=')),
+      );
+      expect(result.right, closeTo(374, 0.1));
+      expect(result.right, closeTo(equals.right, 0.1));
+      expect(tester.takeException(), isNull);
+    },
+  );
   for (final size in [const Size(320, 568), const Size(844, 390)]) {
     testWidgets('long expression is scrollable without overflow at $size', (
       tester,
