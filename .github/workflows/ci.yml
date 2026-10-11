@@ -19,7 +19,9 @@ jobs:
     with:
       flutter-channel: stable
       run-format-check: true
-      run-analyze: false
+      run-analyze: true
       run-tests: true
       build-apk: false
       build-aab: false
+      preflight: true
+      format-paths: "lib test"
