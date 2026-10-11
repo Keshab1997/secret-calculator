@@ -1,82 +1,121 @@
-import * as functions from 'firebase-functions';
-import * as admin from 'firebase-admin';
+import { onValueCreated } from "firebase-functions/v2/database";
+import { initializeApp } from "firebase-admin/app";
+import { getDatabase } from "firebase-admin/database";
+import { getMessaging } from "firebase-admin/messaging";
+import { info, error as logError } from "firebase-functions/logger";
 
-admin.initializeApp();
+initializeApp();
 
-const db = admin.database();
-const messaging = admin.messaging();
+// Keep in sync with FirebaseService.defaultDatabaseUrl (Flutter client).
+const DATABASE_INSTANCE = "secret-calculator-fce20-default-rtdb";
+const DATABASE_REGION = "asia-southeast1";
 
-// Region must match the database region (asia-southeast1) for co-located functions.
-export const onNewMessage = functions
-    .region('asia-southeast1')
-    .database.ref('/rooms/{roomId}/messages/{messageId}')
-    .onCreate(async (snapshot, context) => {
-      // Exit if this is an expiry-only update (no text/image/audio)
-      const data = snapshot.val();
-      if (!data || (!data.text && !data.imageUrl && !data.audioUrl)) {
-        return null;
-      }
+// Fires when a new child appears under /rooms/{roomId}/messages/{messageId}.
+// Sends a disguised "Calculator" push to the other peer so the app still
+// looks like a calculator on the lock screen / notification shade.
+export const onNewMessage = onValueCreated(
+  {
+    ref: "/rooms/{roomId}/messages/{messageId}",
+    instance: DATABASE_INSTANCE,
+    region: DATABASE_REGION,
+  },
+  async (event) => {
+    const data = event.data.val() as {
+      text?: string | null;
+      imageUrl?: string | null;
+      audioData?: string | null;
+      audioUrl?: string | null;
+      senderId?: unknown;
+    } | null;
 
-      const { roomId } = context.params;
-      const senderId = data.senderId;
-      if (!senderId || typeof senderId !== 'string') {
-        return null;
-      }
+    // Skip expiry-only writes and non-message nodes (reactions/seen updates
+    // don't create children, but guard anyway).
+    if (
+      !data ||
+      (!data.text && !data.imageUrl && !data.audioData && !data.audioUrl)
+    ) {
+      return null;
+    }
 
-      // Find the other peer's FCM token in the same room
-      const tokensSnap = await db
-          .ref(`rooms/${roomId}/tokens`)
-          .once('value');
-      const tokens = tokensSnap.val() || {};
+    const { roomId, messageId } = event.params;
+    const senderId = data.senderId;
+    if (!senderId || typeof senderId !== "string") {
+      return null;
+    }
 
-      const partnerToken = Object.entries(tokens).find(
-          ([peerId]) => peerId !== senderId
-      )?.[1];
+    // Find the other peer's FCM token in the same room.
+    const tokensSnap = await getDatabase()
+      .ref(`rooms/${roomId}/tokens`)
+      .once("value");
+    const tokens = (tokensSnap.val() || {}) as Record<string, unknown>;
 
-      if (!partnerToken || typeof partnerToken !== 'string') {
-        // No partner device registered for push — local notifications will
-        // still fire if the app is open or backgrounded.
-        return null;
-      }
+    const partnerEntry = Object.entries(tokens).find(
+      ([peerId]) => peerId !== senderId
+    );
+    const partnerToken = partnerEntry?.[1];
+    const partnerPeerId = partnerEntry?.[0];
 
-      // Build a disguised notification so the app still looks like a calculator
-      const notificationTitle = 'Calculator';
-      const notificationBody = '📊 New calculation saved';
+    if (!partnerToken || typeof partnerToken !== "string") {
+      // No partner device registered for push — local notifications will
+      // still fire if the app is open or backgrounded.
+      info(`onNewMessage: no partner token in room ${roomId}, skipping push`);
+      return null;
+    }
 
-      const payload: admin.messaging.Message = {
+    try {
+      await getMessaging().send({
         notification: {
-          title: notificationTitle,
-          body: notificationBody,
+          // Disguised so the app still looks like a calculator.
+          title: "Calculator",
+          body: "📊 New calculation saved",
         },
         token: partnerToken,
         data: {
           // Extra data so the app can route the tap to open the chat.
-          click_action: 'FLUTTER_NOTIFICATION_CLICK',
-          roomId: roomId,
-          messageId: context.params.messageId,
+          click_action: "FLUTTER_NOTIFICATION_CLICK",
+          roomId: String(roomId),
+          messageId: String(messageId),
         },
         android: {
-          priority: 'high',
+          priority: "high",
           notification: {
-            sound: 'default',
-            channelId: 'calculator_channel_v2',
+            sound: "default",
+            channelId: "calculator_channel_v2",
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: 'default',
+              sound: "default",
             },
           },
         },
-      };
-
-      try {
-        await messaging.send(payload);
-      } catch (err) {
-        // Token may be stale — best-effort cleanup.
-        console.error('Failed to send FCM:', err);
+      });
+      info(`onNewMessage: push sent in room ${roomId}`);
+    } catch (err: unknown) {
+      // Token may be stale — drop it so the next message doesn't fail again.
+      // The client re-registers its token via registerFcmToken() on join.
+      const code =
+        typeof err === "object" && err !== null && "code" in err
+          ? String((err as { code: unknown }).code)
+          : "";
+      if (
+        code.includes("registration-token-not-registered") ||
+        code.includes("invalid-argument")
+      ) {
+        try {
+          await getDatabase()
+            .ref(`rooms/${roomId}/tokens/${partnerPeerId}`)
+            .remove();
+          info(`onNewMessage: removed stale token in room ${roomId}`);
+        } catch (cleanupErr) {
+          logError("Failed to remove stale FCM token:", cleanupErr);
+        }
+      } else {
+        logError("Failed to send FCM:", err);
       }
+    }
 
-      return null;
-    });
+    return null;
+  }
+);
