@@ -84,7 +84,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
+class _ChatScreenState extends State<ChatScreen>
+    with WidgetsBindingObserver, TickerProviderStateMixin {
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
@@ -95,6 +96,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final EncryptionService _encryption = EncryptionService();
   final NotificationService _notifications = NotificationService();
   final NativeBridgeService _native = NativeBridgeService();
+
+  // Animation controllers
+  late AnimationController _messageAnimController;
+  final Map<String, AnimationController> _emojiAnimControllers = {};
 
   StreamSubscription<DatabaseEvent>? _messagesSub;
   StreamSubscription<DatabaseEvent>? _statusSub;
@@ -143,6 +148,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _disappearingSeconds = _firebase.disappearingSeconds;
     _firebase.updateOnlineStatus(true);
+
+    // Animation controller for message entrance animations
+    _messageAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+
     _listenForMessages();
     _listenForPartnerStatus();
     _listenForIncomingCalls();
@@ -165,6 +177,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _messageController.dispose();
     _searchController.dispose();
     _scrollController.dispose();
+    _messageAnimController.dispose();
+    // Clean up emoji animation controllers
+    for (final controller in _emojiAnimControllers.values) {
+      controller.dispose();
+    }
     _firebase.updateOnlineStatus(false, isTyping: false);
     super.dispose();
   }
@@ -1641,7 +1658,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                   IconButton(
                     icon: Icon(
-                      _showStickerKeyboard ? Icons.keyboard : Icons.emoji_objects_outlined,
+                      _showStickerKeyboard
+                          ? Icons.keyboard
+                          : Icons.emoji_objects_outlined,
                       color: _theme.accentColor,
                     ),
                     onPressed: _isRecordingVoice
@@ -1770,231 +1789,259 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final uniqueReactions = message.reactions.values.toSet().toList();
     final isPlayingVoice = _playingMessageId == message.id;
 
-    return GestureDetector(
-      onLongPress: () => _showMessageActions(message),
-      onHorizontalDragEnd: (details) {
-        if ((details.primaryVelocity ?? 0).abs() > 150) {
-          setState(() => _replyingTo = message);
-        }
-      },
-      child: Align(
-        alignment: message.isMe ? Alignment.centerRight : Alignment.centerLeft,
-        child: Column(
-          crossAxisAlignment: message.isMe
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          children: [
-            Container(
-              margin: const EdgeInsets.only(bottom: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.76,
-              ),
-              decoration: BoxDecoration(
-                gradient: message.isMe
-                    ? LinearGradient(
-                        colors: _theme.myBubbleGradient,
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      )
-                    : null,
-                color: message.isMe ? null : _theme.partnerBubbleColor,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft: Radius.circular(message.isMe ? 18 : 4),
-                  bottomRight: Radius.circular(message.isMe ? 4 : 18),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.2),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
+    // Create a simple slide+fade animation for new messages
+    final animController = _messageAnimController;
+
+    return SizeTransition(
+      sizeFactor: CurvedAnimation(
+        parent: animController,
+        curve: Curves.easeOutBack,
+      ),
+      axis: Axis.vertical,
+      child: FadeTransition(
+        opacity: CurvedAnimation(parent: animController, curve: Curves.easeOut),
+        child: GestureDetector(
+          onLongPress: () => _showMessageActions(message),
+          onHorizontalDragEnd: (details) {
+            if ((details.primaryVelocity ?? 0).abs() > 150) {
+              setState(() => _replyingTo = message);
+            }
+          },
+          child: Align(
+            alignment: message.isMe
+                ? Alignment.centerRight
+                : Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: message.isMe
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  margin: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
                   ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.replyToText != null)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.25),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border(
-                          left: BorderSide(color: _theme.accentColor, width: 3),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            message.replyToIsMe ? 'You' : 'Partner',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: _theme.accentColor,
-                            ),
-                          ),
-                          Text(
-                            message.replyToText!,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: Colors.white70,
-                            ),
-                          ),
-                        ],
-                      ),
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.of(context).size.width * 0.76,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: message.isMe
+                        ? LinearGradient(
+                            colors: _theme.myBubbleGradient,
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: message.isMe ? null : _theme.partnerBubbleColor,
+                    borderRadius: BorderRadius.only(
+                      topLeft: const Radius.circular(18),
+                      topRight: const Radius.circular(18),
+                      bottomLeft: Radius.circular(message.isMe ? 18 : 4),
+                      bottomRight: Radius.circular(message.isMe ? 4 : 18),
                     ),
-                  if (message.imageUrl != null)
-                    GestureDetector(
-                      onTap: () => _openFullScreenImage(message.imageUrl!),
-                      child: Padding(
-                        padding: const EdgeInsets.only(bottom: 6),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: Image.network(
-                            message.imageUrl!,
-                            width: 220,
-                            height: 220,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Container(
-                                width: 220,
-                                height: 220,
-                                color: Colors.grey[850],
-                                child: Center(
-                                  child: CircularProgressIndicator(
-                                    value:
-                                        loadingProgress.expectedTotalBytes !=
-                                            null
-                                        ? loadingProgress
-                                                  .cumulativeBytesLoaded /
-                                              loadingProgress
-                                                  .expectedTotalBytes!
-                                        : null,
-                                  ),
-                                ),
-                              );
-                            },
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (message.replyToText != null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
                           ),
-                        ),
-                      ),
-                    ),
-                  if (message.encryptedAudioData != null)
-                    Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.22),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          InkWell(
-                            onTap: () => _togglePlayVoiceNote(message),
-                            child: CircleAvatar(
-                              radius: 16,
-                              backgroundColor: Colors.white24,
-                              child: Icon(
-                                isPlayingVoice ? Icons.stop : Icons.play_arrow,
-                                color: Colors.white,
-                                size: 20,
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.25),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border(
+                              left: BorderSide(
+                                color: _theme.accentColor,
+                                width: 3,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          Text(
-                            isPlayingVoice
-                                ? 'Playing encrypted audio...'
-                                : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                message.replyToIsMe ? 'You' : 'Partner',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: _theme.accentColor,
+                                ),
+                              ),
+                              Text(
+                                message.replyToText!,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      if (message.imageUrl != null)
+                        GestureDetector(
+                          onTap: () => _openFullScreenImage(message.imageUrl!),
+                          child: Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.network(
+                                message.imageUrl!,
+                                width: 220,
+                                height: 220,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Container(
+                                    width: 220,
+                                    height: 220,
+                                    color: Colors.grey[850],
+                                    child: Center(
+                                      child: CircularProgressIndicator(
+                                        value:
+                                            loadingProgress
+                                                    .expectedTotalBytes !=
+                                                null
+                                            ? loadingProgress
+                                                      .cumulativeBytesLoaded /
+                                                  loadingProgress
+                                                      .expectedTotalBytes!
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
                           ),
+                        ),
+                      if (message.encryptedAudioData != null)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.22),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              InkWell(
+                                onTap: () => _togglePlayVoiceNote(message),
+                                child: CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor: Colors.white24,
+                                  child: Icon(
+                                    isPlayingVoice
+                                        ? Icons.stop
+                                        : Icons.play_arrow,
+                                    color: Colors.white,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Text(
+                                isPlayingVoice
+                                    ? 'Playing encrypted audio...'
+                                    : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (message.text != null && message.text!.isNotEmpty)
+                        Text(
+                          message.text!,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15.5,
+                            height: 1.3,
+                          ),
+                        ),
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (message.expiresAtMs != null) ...[
+                            const Icon(
+                              Icons.timer_outlined,
+                              size: 11,
+                              color: Colors.orangeAccent,
+                            ),
+                            const SizedBox(width: 3),
+                          ],
+                          Text(
+                            '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 10,
+                            ),
+                          ),
+                          if (message.isMe) ...[
+                            const SizedBox(width: 4),
+                            Icon(
+                              message.isSeen ? Icons.done_all : Icons.check,
+                              size: 14,
+                              color: message.isSeen
+                                  ? Colors.lightGreenAccent
+                                  : Colors.white70,
+                            ),
+                          ],
                         ],
                       ),
-                    )
-                  else if (message.text != null && message.text!.isNotEmpty)
-                    Text(
-                      message.text!,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15.5,
-                        height: 1.3,
-                      ),
-                    ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (message.expiresAtMs != null) ...[
-                        const Icon(
-                          Icons.timer_outlined,
-                          size: 11,
-                          color: Colors.orangeAccent,
-                        ),
-                        const SizedBox(width: 3),
-                      ],
-                      Text(
-                        '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 10,
-                        ),
-                      ),
-                      if (message.isMe) ...[
-                        const SizedBox(width: 4),
-                        Icon(
-                          message.isSeen ? Icons.done_all : Icons.check,
-                          size: 14,
-                          color: message.isSeen
-                              ? Colors.lightGreenAccent
-                              : Colors.white70,
-                        ),
-                      ],
                     ],
                   ),
-                ],
-              ),
-            ),
-            if (uniqueReactions.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6, left: 6, right: 6),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 2,
-                  ),
-                  decoration: BoxDecoration(
-                    color: _theme.appBarColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: _theme.accentColor.withValues(alpha: 0.4),
+                ),
+                if (uniqueReactions.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      bottom: 6,
+                      left: 6,
+                      right: 6,
+                    ),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: _theme.appBarColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _theme.accentColor.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      child: Text(
+                        '${uniqueReactions.join(' ')} ${message.reactions.length > 1 ? message.reactions.length : ''}'
+                            .trim(),
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ),
-                  child: Text(
-                    '${uniqueReactions.join(' ')} ${message.reactions.length > 1 ? message.reactions.length : ''}'
-                        .trim(),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                ),
-              ),
-          ],
+              ],
+            ),
+          ),
         ),
       ),
     );
