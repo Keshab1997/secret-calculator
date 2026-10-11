@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/firebase_service.dart';
+import '../services/update_service.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/option_sheet.dart';
@@ -23,6 +24,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _photo;
   String? _error;
   bool _saving = false;
+
+  // App-update check state (GitHub Releases).
+  String? _appVersion;
+  AppUpdateInfo? _appUpdate;
+  bool _checkingUpdate = false;
   @override
   void initState() {
     super.initState();
@@ -30,6 +36,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _about = TextEditingController(text: _service.profile['about']);
     _decoyCode = TextEditingController(text: _service.decoyPasscode ?? '');
     _photo = _service.profile['photo'];
+    _checkForAppUpdate();
+  }
+
+  Future<void> _checkForAppUpdate() async {
+    if (_checkingUpdate) return;
+    _checkingUpdate = true;
+    final status = await UpdateService.checkForUpdate();
+    if (!mounted) return;
+    _checkingUpdate = false;
+    setState(() {
+      _appVersion = status.currentVersion;
+      _appUpdate = status.update;
+    });
+  }
+
+  String _appVersionLabel() {
+    final update = _appUpdate;
+    if (update != null) return 'v${update.version} is available';
+    if (_appVersion != null) return 'v$_appVersion — up to date';
+    return 'Checking for updates…';
+  }
+
+  Future<void> _openAppUpdate() async {
+    final update = _appUpdate;
+    if (update != null) {
+      await UpdateService.openUpdate(update);
+      return;
+    }
+    // Up to date (or never checked): re-check, then confirm.
+    await _checkForAppUpdate();
+    if (!mounted) return;
+    if (_appUpdate != null) return; // a newer build appeared; tile shows it
+    AppToast.show(
+      context,
+      'You have the latest version${_appVersion != null ? ' (v$_appVersion)' : ''}',
+      kind: AppToastKind.success,
+    );
   }
 
   @override
@@ -406,6 +449,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const Text(
                 'To invite someone, open Chats → Pair new contact. Each conversation has its own pairing code. Unpair a contact from that chat\'s menu.',
                 style: TextStyle(fontSize: 13, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+        _sectionLabel('App'),
+        _card(
+          child: Column(
+            children: [
+              _tile(
+                icon: Icons.system_update_outlined,
+                title: 'App version',
+                subtitle: _appVersionLabel(),
+                onTap: _saving ? () {} : _openAppUpdate,
               ),
             ],
           ),

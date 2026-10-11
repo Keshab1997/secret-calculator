@@ -48,6 +48,9 @@ dependencies:
   local_auth: ^3.0.2
   firebase_messaging: ^15.2.10
   emoji_picker_flutter: ^4.5.4
+  # App updates: read the installed version and open the release download.
+  package_info_plus: ^8.0.0
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:
