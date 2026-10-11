@@ -53,6 +53,36 @@ final messagingTheme = ThemeData(
     elevation: 0,
     scrolledUnderElevation: 0.5,
   ),
+  // Dialogs and snack bars are part of the app's voice too: one rounded
+  // shape and one floating style instead of the platform defaults.
+  dialogTheme: DialogThemeData(
+    backgroundColor: Colors.white,
+    surfaceTintColor: Colors.transparent,
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+    titleTextStyle: const TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 17.5,
+      fontWeight: FontWeight.w600,
+      color: chatInk,
+    ),
+    contentTextStyle: const TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 14.5,
+      height: 1.35,
+      color: Colors.black87,
+    ),
+  ),
+  snackBarTheme: SnackBarThemeData(
+    behavior: SnackBarBehavior.floating,
+    backgroundColor: const Color(0xFF1F2A30),
+    contentTextStyle: const TextStyle(
+      fontFamily: appFontFamily,
+      fontSize: 14,
+      color: Colors.white,
+    ),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    insetPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+  ),
 );
 
 /// A messaging route: fade through with a small rise instead of the platform

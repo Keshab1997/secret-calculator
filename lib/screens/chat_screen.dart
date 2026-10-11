@@ -804,36 +804,29 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  void _showImageOptions() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _theme.appBarColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: Icon(Icons.photo_library, color: _theme.accentColor),
-              title: const Text('Send Photo from Gallery'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickImage();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.camera_alt, color: _theme.accentColor),
-              title: const Text('Take Photo with Camera'),
-              onTap: () {
-                Navigator.pop(context);
-                _takePhoto();
-              },
-            ),
-          ],
+  Future<void> _showImageOptions() async {
+    final choice = await showOptionSheet(
+      context,
+      title: 'Send a photo',
+      subtitle: 'Photos are encrypted before they leave this phone',
+      items: const [
+        OptionSheetItem(
+          value: 'gallery',
+          icon: Icons.photo_library_outlined,
+          label: 'Gallery',
         ),
-      ),
+        OptionSheetItem(
+          value: 'camera',
+          icon: Icons.camera_alt_outlined,
+          label: 'Camera',
+        ),
+      ],
     );
+    if (choice == 'gallery') {
+      await _pickImage();
+    } else if (choice == 'camera') {
+      await _takePhoto();
+    }
   }
 
   void _showCallOptions({bool isVideo = false}) {
@@ -955,141 +948,158 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  void _showMessageActions(ChatMessage message) {
+  /// The reaction row that heads the message sheet: one tap reacts and
+  /// closes, and the current reaction wears a ring instead of a plain tint.
+  Widget _buildReactionBar(ChatMessage message) {
     final myCurrentReaction = message.reactions[_firebase.myPeerId];
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: _theme.appBarColor,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: _reactionOptions.map((emoji) {
-                    final isSelected = myCurrentReaction == emoji;
-                    return GestureDetector(
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _firebase.toggleReaction(
-                          message.id,
-                          emoji,
-                          currentReaction: myCurrentReaction,
-                        );
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? _theme.accentColor.withValues(alpha: 0.3)
-                              : Colors.transparent,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          emoji,
-                          style: const TextStyle(fontSize: 26),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: _reactionOptions.map((emoji) {
+          final isSelected = myCurrentReaction == emoji;
+          return InkWell(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              Navigator.pop(context);
+              _firebase.toggleReaction(
+                message.id,
+                emoji,
+                currentReaction: myCurrentReaction,
+              );
+            },
+            customBorder: const CircleBorder(),
+            child: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isSelected ? chatGreen.withValues(alpha: 0.12) : null,
+                border: isSelected
+                    ? Border.all(color: chatGreen, width: 1.6)
+                    : null,
               ),
-              const Divider(height: 16),
-              ListTile(
-                leading: const Icon(Icons.reply, color: chatInk),
-                title: const Text('Reply'),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  setState(() {
-                    _replyingTo = message;
-                  });
-                },
-              ),
-              if (message.text != null && message.text!.isNotEmpty)
-                ListTile(
-                  leading: const Icon(Icons.copy, color: chatInk),
-                  title: const Text('Copy Text'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    Clipboard.setData(ClipboardData(text: message.text!));
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Message copied to clipboard'),
-                        duration: Duration(seconds: 1),
-                      ),
-                    );
-                  },
-                ),
-              ListTile(
-                leading: const Icon(
-                  Icons.delete_outline,
-                  color: Colors.redAccent,
-                ),
-                title: const Text(
-                  'Delete for Everyone',
-                  style: TextStyle(color: Colors.redAccent),
-                ),
-                onTap: () {
-                  Navigator.pop(sheetContext);
-                  _firebase.deleteMessage(
-                    message.id,
-                    imageUrl: message.imageUrl,
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
+              child: Text(emoji, style: const TextStyle(fontSize: 26)),
+            ),
+          );
+        }).toList(),
       ),
     );
+  }
+
+  Future<void> _showMessageActions(ChatMessage message) async {
+    final canCopy = message.text != null && message.text!.isNotEmpty;
+    final value = await showOptionSheet(
+      context,
+      title: 'Message',
+      subtitle:
+          'Sent ${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
+      header: _buildReactionBar(message),
+      items: [
+        const OptionSheetItem(
+          value: 'reply',
+          icon: Icons.reply,
+          label: 'Reply',
+        ),
+        if (canCopy)
+          const OptionSheetItem(
+            value: 'copy',
+            icon: Icons.copy,
+            label: 'Copy Text',
+          ),
+        const OptionSheetItem(
+          value: 'delete',
+          icon: Icons.delete_outline,
+          label: 'Delete for Everyone',
+          destructive: true,
+        ),
+      ],
+    );
+    if (value == null || !mounted) return;
+    switch (value) {
+      case 'reply':
+        setState(() => _replyingTo = message);
+        break;
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: message.text!));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message copied to clipboard'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+        break;
+      case 'delete':
+        _firebase.deleteMessage(message.id, imageUrl: message.imageUrl);
+        break;
+    }
   }
 
   void _showThemePicker() {
     showModalBottomSheet(
       context: context,
-      backgroundColor: _theme.appBarColor,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(0, 10, 0, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'Choose Chat Theme',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              _sheetHandle(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
+                child: Text(
+                  'Choose Chat Theme',
+                  style: Theme.of(sheetContext).textTheme.titleLarge,
+                ),
               ),
-              const SizedBox(height: 12),
               ...List.generate(ChatThemePalette.presets.length, (index) {
                 final item = ChatThemePalette.presets[index];
                 final isSelected = index == _selectedThemeIndex;
-                return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: item.myBubbleGradient.first,
-                    child: isSelected
-                        ? const Icon(Icons.check, color: Colors.white)
-                        : null,
-                  ),
-                  title: Text(item.name),
+                return InkWell(
                   onTap: () {
+                    HapticFeedback.selectionClick();
                     setState(() {
                       _selectedThemeIndex = index;
                     });
                     Navigator.pop(sheetContext);
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 9,
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: item.myBubbleGradient,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            item.name,
+                            style: Theme.of(sheetContext).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: isSelected ? chatGreen : chatInk,
+                                ),
+                          ),
+                        ),
+                        if (isSelected)
+                          const Icon(Icons.check_circle, color: chatGreen),
+                      ],
+                    ),
+                  ),
                 );
               }),
             ],
@@ -1115,39 +1125,41 @@ class _ChatScreenState extends State<ChatScreen>
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: _theme.appBarColor,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(0, 10, 0, 12),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
-                children: [
-                  Icon(Icons.timer_outlined, color: Colors.orangeAccent),
-                  SizedBox(width: 8),
-                  Text(
-                    'Disappearing Messages Timer',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                ],
+              _sheetHandle(),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Disappearing messages',
+                      style: Theme.of(sheetContext).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'New messages clear themselves here and on the other phone',
+                      style: Theme.of(sheetContext).textTheme.bodySmall
+                          ?.copyWith(color: Colors.grey[600]),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
               ...options.map((opt) {
                 final selected = _disappearingSeconds == opt.value;
-                return ListTile(
-                  leading: Icon(
-                    selected
-                        ? Icons.radio_button_checked
-                        : Icons.radio_button_off,
-                    color: _theme.accentColor,
-                  ),
-                  title: Text(opt.key),
+                return InkWell(
                   onTap: () {
+                    HapticFeedback.selectionClick();
                     setState(() {
                       _disappearingSeconds = opt.value;
                     });
@@ -1155,6 +1167,30 @@ class _ChatScreenState extends State<ChatScreen>
                     _firebase.setDisappearingSeconds(opt.value);
                     Navigator.pop(sheetContext);
                   },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selected ? Icons.check_circle : Icons.circle_outlined,
+                          color: selected ? chatGreen : Colors.grey[400],
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Text(
+                            opt.key,
+                            style: Theme.of(sheetContext).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: selected ? chatGreen : chatInk,
+                                ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 );
               }),
             ],
@@ -1164,6 +1200,18 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  /// The little grabber every sheet carries, so the sheets read as one family.
+  Widget _sheetHandle() => Center(
+    child: Container(
+      width: 40,
+      height: 4,
+      decoration: BoxDecoration(
+        color: Colors.black12,
+        borderRadius: BorderRadius.circular(4),
+      ),
+    ),
+  );
+
   void _showRoomInfoDialog() {
     final code = _firebase.getShortCode();
     showDialog(
@@ -1172,7 +1220,7 @@ class _ChatScreenState extends State<ChatScreen>
         backgroundColor: _theme.appBarColor,
         title: const Row(
           children: [
-            Icon(Icons.verified_user, color: Colors.greenAccent),
+            Icon(Icons.verified_user, color: chatGreen),
             SizedBox(width: 8),
             Text('Secret Room Info'),
           ],
@@ -1194,7 +1242,7 @@ class _ChatScreenState extends State<ChatScreen>
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 4,
-                    color: Colors.greenAccent,
+                    color: chatGreen,
                   ),
                 ),
                 const Spacer(),
@@ -1241,7 +1289,6 @@ class _ChatScreenState extends State<ChatScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: _theme.appBarColor,
         title: const Text('Clear Secret Chat?'),
         content: const Text(
           'This will permanently delete all messages in this room for both phones.',
@@ -1454,41 +1501,49 @@ class _ChatScreenState extends State<ChatScreen>
               Expanded(
                 child: displayedMessages.isEmpty
                     ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(20),
-                              decoration: BoxDecoration(
-                                color: _theme.appBarColor,
-                                shape: BoxShape.circle,
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 88,
+                                height: 88,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: chatGreen.withValues(alpha: 0.08),
+                                ),
+                                child: Icon(
+                                  _searchQuery.isNotEmpty
+                                      ? Icons.search_off
+                                      : Icons.lock_outline,
+                                  size: 38,
+                                  color: chatGreen,
+                                ),
                               ),
-                              child: Icon(
-                                Icons.lock_outline,
-                                size: 48,
-                                color: _theme.accentColor,
+                              const SizedBox(height: 20),
+                              Text(
+                                _searchQuery.isNotEmpty
+                                    ? 'No matching messages found'
+                                    : 'Start a secret conversation',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 16),
-                            Text(
-                              _searchQuery.isNotEmpty
-                                  ? 'No matching messages found'
-                                  : 'Start a secret conversation',
-                              style: TextStyle(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.grey[600],
+                              const SizedBox(height: 8),
+                              Text(
+                                'Only your paired conversation appears here',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  fontSize: 13.5,
+                                  height: 1.35,
+                                  color: Colors.grey[600],
+                                ),
                               ),
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              'Only your paired conversation appears here',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       )
                     : ListView.builder(

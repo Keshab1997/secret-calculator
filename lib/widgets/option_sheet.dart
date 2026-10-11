@@ -29,6 +29,7 @@ Future<String?> showOptionSheet(
   BuildContext context, {
   required String title,
   String? subtitle,
+  Widget? header,
   required List<OptionSheetItem> items,
 }) {
   return showModalBottomSheet<String>(
@@ -73,7 +74,13 @@ Future<String?> showOptionSheet(
                 ],
               ),
             ),
-            const SizedBox(height: 4),
+            if (header != null) ...[
+              const SizedBox(height: 6),
+              header,
+              const SizedBox(height: 6),
+              const Divider(height: 1),
+              const SizedBox(height: 6),
+            ],
             for (final item in items)
               _OptionTile(
                 item: item,
