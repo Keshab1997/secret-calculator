@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/sticker_data.dart';
+import 'sticker_art.dart';
 
 class StickerKeyboard extends StatefulWidget {
   final void Function(String emoji) onStickerSelected;
@@ -35,7 +36,7 @@ class _StickerKeyboardState extends State<StickerKeyboard> {
         : _categories[_selectedCategoryIndex].stickers;
 
     return Container(
-      height: 230,
+      height: 300,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         border: Border(top: BorderSide(color: Colors.grey.shade300)),
@@ -106,8 +107,8 @@ class _StickerKeyboardState extends State<StickerKeyboard> {
                       onSelected: (_) =>
                           setState(() => _selectedCategoryIndex = index),
                       backgroundColor: Colors.grey.shade200,
-                      selectedColor: Colors.blue.shade100,
-                      checkmarkColor: Colors.blue,
+                      selectedColor: const Color(0xFFD9FDD3),
+                      checkmarkColor: const Color(0xFF168B53),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
@@ -121,33 +122,44 @@ class _StickerKeyboardState extends State<StickerKeyboard> {
           Expanded(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: GridView.builder(
-                padding: const EdgeInsets.only(top: 4),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 7,
-                  childAspectRatio: 1,
-                ),
-                itemCount: allStickers.length,
-                itemBuilder: (context, index) {
-                  final sticker = allStickers[index];
+              child: allStickers.isEmpty
+                  ? const Center(
+                      child: Text(
+                        'No stickers found. Try love, happy or heart.',
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.only(top: 4),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 4,
+                            mainAxisSpacing: 6,
+                            crossAxisSpacing: 6,
+                            childAspectRatio: 1,
+                          ),
+                      itemCount: allStickers.length,
+                      itemBuilder: (context, index) {
+                        final sticker = allStickers[index];
 
-                  return GestureDetector(
-                    onTap: () => widget.onStickerSelected(sticker.emoji),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Center(
-                        child: Text(
-                          sticker.emoji,
-                          style: const TextStyle(fontSize: 24),
-                        ),
-                      ),
+                        return Semantics(
+                          label: sticker.name,
+                          button: true,
+                          child: GestureDetector(
+                            onTap: () =>
+                                widget.onStickerSelected(sticker.emoji),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Center(
+                                child: StickerArt(emoji: sticker.emoji),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ),
         ],

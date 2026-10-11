@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
-import 'chat_screen.dart';
-import 'pairing_screen.dart';
+import 'chats_screen.dart';
+import '../widgets/messaging_style.dart';
 
 /// Pure calculator state machine with default (`1997`) and custom secret-code detection.
 class CalculatorEngine {
@@ -201,13 +201,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       if (!verified || !mounted) return;
     }
     if (!mounted) return;
-    final destination = _firebase.isPaired
-        ? const ChatScreen()
-        : const PairingScreen();
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => destination),
-    );
+    Navigator.push(context, messagingRoute(const ChatsScreen()));
   }
 
   Widget _buildButton(

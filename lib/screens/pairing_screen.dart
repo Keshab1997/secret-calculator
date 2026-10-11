@@ -2,12 +2,15 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/firebase_service.dart';
 import 'chat_screen.dart';
+import '../widgets/messaging_style.dart';
 
 class PairingScreen extends StatefulWidget {
-  const PairingScreen({super.key});
+  final bool returnToDirectory;
+  const PairingScreen({super.key, this.returnToDirectory = false});
 
   @override
   State<PairingScreen> createState() => _PairingScreenState();
@@ -73,12 +76,24 @@ class _PairingScreenState extends State<PairingScreen> {
     if (!mounted || _hasNavigated) return;
     _hasNavigated = true;
     _membersSub?.cancel();
-    await _firebase.markRoomPaired();
+    try {
+      await _firebase.markRoomPaired();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _hasNavigated = false;
+          _isLoading = false;
+          _error = 'Could not save pairing. Please try again.';
+        });
+      }
+      return;
+    }
     if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (context) => const ChatScreen()),
-    );
+    if (widget.returnToDirectory) {
+      Navigator.pop(context);
+    } else {
+      Navigator.pushReplacement(context, messagingRoute(const ChatScreen()));
+    }
   }
 
   Future<void> _joinRoom() async {
@@ -118,7 +133,7 @@ class _PairingScreenState extends State<PairingScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Pair Device'),
-        backgroundColor: Colors.deepPurple,
+        backgroundColor: chatGreen,
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
@@ -133,11 +148,7 @@ class _PairingScreenState extends State<PairingScreen> {
                 padding: const EdgeInsets.all(24.0),
                 child: Column(
                   children: [
-                    const Icon(
-                      Icons.phone_android,
-                      size: 48,
-                      color: Colors.deepPurple,
-                    ),
+                    const Icon(Icons.phone_android, size: 48, color: chatGreen),
                     const SizedBox(height: 16),
                     const Text(
                       'Your Pair Code',
@@ -156,20 +167,40 @@ class _PairingScreenState extends State<PairingScreen> {
                           vertical: 16,
                         ),
                         decoration: BoxDecoration(
-                          color: Colors.grey[900],
+                          color: Colors.grey[100],
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: Text(
-                          _myCode!,
-                          style: const TextStyle(
-                            fontSize: 36,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 8,
-                            color: Colors.green,
+                        child: FittedBox(
+                          fit: BoxFit.scaleDown,
+                          child: Text(
+                            _myCode!,
+                            style: const TextStyle(
+                              fontSize: 36,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 8,
+                              color: Colors.green,
+                            ),
                           ),
                         ),
                       ),
                     const SizedBox(height: 16),
+                    if (_myCode != null)
+                      TextButton.icon(
+                        icon: const Icon(Icons.copy, size: 18),
+                        label: const Text('Copy pairing code'),
+                        onPressed: () async {
+                          await Clipboard.setData(
+                            ClipboardData(text: _myCode!),
+                          );
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Pairing code copied'),
+                              ),
+                            );
+                          }
+                        },
+                      ),
                     const Text(
                       'Share this code with your partner',
                       style: TextStyle(color: Colors.grey),
@@ -229,7 +260,7 @@ class _PairingScreenState extends State<PairingScreen> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                         filled: true,
-                        fillColor: Colors.grey[900],
+                        fillColor: Colors.grey[100],
                       ),
                     ),
                     const SizedBox(height: 16),

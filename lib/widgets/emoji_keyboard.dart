@@ -4,11 +4,15 @@ import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 class EmojiKeyboard extends StatelessWidget {
   final void Function(Emoji emoji) onEmojiSelected;
   final Color? backgroundColor;
+  final TextEditingController? controller;
+  final VoidCallback? onTextChanged;
 
   const EmojiKeyboard({
     super.key,
     required this.onEmojiSelected,
     this.backgroundColor,
+    this.controller,
+    this.onTextChanged,
   });
 
   @override
@@ -17,6 +21,8 @@ class EmojiKeyboard extends StatelessWidget {
       height: 250,
       color: backgroundColor ?? Theme.of(context).colorScheme.surface,
       child: EmojiPicker(
+        textEditingController: controller,
+        onBackspacePressed: onTextChanged,
         onEmojiSelected: (Category? category, Emoji emoji) {
           onEmojiSelected(emoji);
         },
@@ -40,15 +46,15 @@ class EmojiKeyboard extends StatelessWidget {
             initCategory: Category.SMILEYS,
             categoryIcons: const CategoryIcons(),
             iconColor: Colors.grey,
-            iconColorSelected: Colors.blue,
-            indicatorColor: Colors.blue,
-            backspaceColor: Colors.blue,
+            iconColorSelected: const Color(0xFF168B53),
+            indicatorColor: const Color(0xFF168B53),
+            backspaceColor: const Color(0xFF168B53),
           ),
           bottomActionBarConfig: const BottomActionBarConfig(
             enabled: true,
             showBackspaceButton: true,
             showSearchViewButton: true,
-            buttonColor: Colors.blue,
+            buttonColor: Color(0xFF168B53),
             buttonIconColor: Colors.white,
           ),
           searchViewConfig: const SearchViewConfig(

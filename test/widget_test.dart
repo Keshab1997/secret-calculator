@@ -1,7 +1,7 @@
 import 'package:calculator/main.dart';
 import 'package:calculator/screens/calculator_screen.dart';
 import 'package:calculator/screens/chat_screen.dart';
-import 'package:calculator/screens/pairing_screen.dart';
+import 'package:calculator/screens/chats_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -109,7 +109,7 @@ void main() {
       expect(find.text('12'), findsOneWidget);
     });
 
-    testWidgets('Typing 1997 navigates to PairingScreen', (
+    testWidgets('Typing 1997 opens private Chats directory', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(const CalculatorApp());
@@ -120,8 +120,8 @@ void main() {
       await tester.tap(find.widgetWithText(ElevatedButton, '7'));
       await tester.pumpAndSettle();
 
-      expect(find.byType(PairingScreen), findsOneWidget);
-      expect(find.text('Pair Device'), findsOneWidget);
+      expect(find.byType(ChatsScreen), findsOneWidget);
+      expect(find.text('Chats'), findsNWidgets(2));
     });
 
     testWidgets(
@@ -129,15 +129,16 @@ void main() {
       (WidgetTester tester) async {
         await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
 
-        expect(find.text('Secret Chat'), findsOneWidget);
-        expect(find.byTooltip('Quick Hide to Calculator'), findsOneWidget);
+        expect(find.text('Paired contact'), findsOneWidget);
 
         // Check emoji and sticker buttons are present
         expect(find.byIcon(Icons.emoji_emotions_outlined), findsOneWidget);
-        expect(find.byIcon(Icons.emoji_objects_outlined), findsOneWidget);
+        expect(find.byTooltip('Camera'), findsOneWidget);
 
         // Toggle search bar
-        await tester.tap(find.byTooltip('Search Messages'));
+        await tester.tap(find.byIcon(Icons.more_vert));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Search Messages'));
         await tester.pump();
         expect(find.byType(TextField), findsNWidgets(2));
       },

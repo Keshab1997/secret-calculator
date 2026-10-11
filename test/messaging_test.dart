@@ -1,0 +1,117 @@
+import 'package:calculator/screens/chat_screen.dart';
+import 'package:calculator/screens/chats_screen.dart';
+import 'package:calculator/widgets/messaging_style.dart';
+import 'package:calculator/widgets/sticker_keyboard.dart';
+import 'package:calculator/widgets/sticker_art.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  testWidgets('directory has Chats, Calls, You and no unsupported features', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(theme: messagingTheme, home: const ChatsScreen()),
+    );
+    expect(find.text('Your private conversations'), findsOneWidget);
+    expect(find.byTooltip('Pair new contact'), findsOneWidget);
+    await tester.tap(find.text('Calls'));
+    await tester.pumpAndSettle();
+    expect(find.text('No calls yet'), findsOneWidget);
+    await tester.tap(find.text('You'));
+    await tester.pumpAndSettle();
+    expect(find.text('Save profile'), findsOneWidget);
+    expect(find.text('About'), findsOneWidget);
+    for (final excluded in ['Meta AI', 'Updates', 'Payments']) {
+      expect(find.text(excluded), findsNothing);
+    }
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('sticker search returns matching artwork and an empty state', (
+    tester,
+  ) async {
+    String? selected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: messagingTheme,
+        home: Scaffold(
+          body: StickerKeyboard(onStickerSelected: (value) => selected = value),
+        ),
+      ),
+    );
+    await tester.enterText(find.byType(TextField), 'love');
+    await tester.pumpAndSettle();
+    expect(find.byType(StickerArt), findsWidgets);
+    await tester.tap(find.byType(StickerArt).first);
+    expect(selected, isNotNull);
+    await tester.enterText(find.byType(TextField), 'no-such-sticker');
+    await tester.pumpAndSettle();
+    expect(
+      find.text('No stickers found. Try love, happy or heart.'),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets(
+    'narrow chat renders messages, real call results, sticker panel and back handling',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('plugins.flutter.io/shared_preferences'),
+        (_) async => <String, Object>{},
+      );
+      final date = DateTime(2026, 10, 11, 10, 30);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: messagingTheme,
+          home: ChatScreen(
+            contactName: 'A very long contact display name',
+            initialMessages: [
+              ChatMessage(
+                id: 'text',
+                text: 'Hello there',
+                isMe: true,
+                timestamp: date,
+              ),
+              ChatMessage(
+                id: 'sticker',
+                text: 'sticker:v1:💕',
+                isMe: false,
+                timestamp: date,
+              ),
+              ChatMessage(
+                id: 'call',
+                callType: 'video',
+                isMe: false,
+                timestamp: date,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Hello there'), findsOneWidget);
+      expect(find.text('Missed Video call'), findsOneWidget);
+      expect(find.byType(StickerArt), findsOneWidget);
+      await tester.tap(find.byTooltip('Emoji keyboard'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Stickers'));
+      await tester.pumpAndSettle();
+      expect(find.byType(StickerKeyboard), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.byType(StickerKeyboard), findsNothing);
+      expect(find.byType(ChatScreen), findsOneWidget);
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      expect(find.text('Quick Hide to Calculator'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+}
