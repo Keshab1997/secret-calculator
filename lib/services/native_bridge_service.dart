@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import 'encryption_service.dart';
 import 'media_cache_service.dart';
@@ -79,10 +80,21 @@ class NativeBridgeService {
 
   /// Decrypts an AES-256-GCM encrypted base64 audio payload, writes it to a
   /// temporary `.m4a` file, and plays it via the native media player.
+  /// Testing seam: when set, [playEncryptedAudio] delegates to this instead
+  /// of decrypting and touching the disk — the UI's play/stop/progress
+  /// behavior does not depend on any of that.
+  @visibleForTesting
+  Future<bool> Function(String payload, EncryptionService encryption)?
+  playEncryptedAudioForTesting;
+
   Future<bool> playEncryptedAudio(
     String encryptedBase64Payload,
     EncryptionService encryption,
   ) async {
+    final override = playEncryptedAudioForTesting;
+    if (override != null) {
+      return override(encryptedBase64Payload, encryption);
+    }
     try {
       final decryptedBase64 = encryption.decrypt(encryptedBase64Payload);
       final bytes = base64Decode(decryptedBase64);

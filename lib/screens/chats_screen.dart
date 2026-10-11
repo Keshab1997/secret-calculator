@@ -456,21 +456,43 @@ class _ChatsScreenState extends State<ChatsScreen>
                               code,
                               _rooms[code]?['profiles'],
                             );
+                            final isCaller =
+                                message['senderId'] == _service.peerId;
+                            final log = callLogText(
+                              callType: message['callType'] as String?,
+                              callSeconds: message['callSeconds'] as int?,
+                              callOutcome: message['callOutcome'] as String?,
+                              isMe: isCaller,
+                            );
+                            final rowIcon = callRowIcon(
+                              isMe: isCaller,
+                              callOutcome: message['callOutcome'] as String?,
+                            );
+                            final missedMine =
+                                (message['callOutcome'] ?? 'missed') ==
+                                    'missed' &&
+                                !isCaller;
+                            final headline = log.detail.isEmpty
+                                ? log.title
+                                : '${log.title} · ${log.detail}';
                             return _staggered(
                               index,
                               ListTile(
                                 leading: ProfileAvatar(photo: profile['photo']),
                                 title: Text(
                                   profile['name'] ?? 'Paired contact',
+                                  style: missedMine
+                                      ? const TextStyle(
+                                          color: Color(0xFFE5484D),
+                                        )
+                                      : null,
                                 ),
                                 subtitle: Text(
-                                  '${_preview(code, message)} · ${_time(message['timestamp'])}',
+                                  '$headline · ${_time(message['timestamp'])}',
                                 ),
                                 trailing: Icon(
-                                  message['callType'] == 'video'
-                                      ? Icons.videocam_outlined
-                                      : Icons.call_outlined,
-                                  color: chatGreen,
+                                  rowIcon.icon,
+                                  color: rowIcon.color,
                                 ),
                                 onTap: () => _open(
                                   code,

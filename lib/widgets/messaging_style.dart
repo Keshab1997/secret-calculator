@@ -150,6 +150,23 @@ String formatCallDuration(int totalSeconds) {
   }
 }
 
+/// The call-row's trailing glyph: direction at a glance, and the one thing
+/// that needs action — an incoming call that went unanswered — is the
+/// loudest one in the list.
+({IconData icon, Color color}) callRowIcon({
+  required bool isMe,
+  String? callOutcome,
+}) {
+  final outcome = callOutcome ?? 'missed';
+  if (outcome == 'missed' && !isMe) {
+    return (icon: Icons.call_missed_outlined, color: const Color(0xFFE5484D));
+  }
+  return (
+    icon: isMe ? Icons.call_made_outlined : Icons.call_received_outlined,
+    color: outcome == 'completed' ? chatGreen : const Color(0xFF8A97A0),
+  );
+}
+
 class ProfileAvatar extends StatelessWidget {
   final String? photo;
   final double radius;

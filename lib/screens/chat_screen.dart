@@ -120,6 +120,12 @@ class _ChatScreenState extends State<ChatScreen>
   DateTime? _micDownAt;
   bool _micCancelArmed = false;
   String? _playingMessageId;
+
+  /// Playback progress (0..1) of the note currently playing. The native side
+  /// plays the decrypted audio, so the waveform is driven by a timer over the
+  /// known duration rather than a decoder position.
+  double _voiceProgress = 0;
+  Timer? _voiceProgressTimer;
   bool _isShowingCall = false;
   bool _pickingExternalMedia = false;
 
@@ -164,6 +170,7 @@ class _ChatScreenState extends State<ChatScreen>
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
     _expiryTimer?.cancel();
+    _voiceProgressTimer?.cancel();
     _recordingTimer?.cancel();
     _messagesSub?.cancel();
     _statusSub?.cancel();
@@ -677,20 +684,51 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _togglePlayVoiceNote(ChatMessage message) async {
     if (message.encryptedAudioData == null) return;
     if (_playingMessageId == message.id) {
+      _stopVoiceProgress();
       await _native.stopAudio();
       if (!mounted) return;
       setState(() => _playingMessageId = null);
       return;
     }
-    setState(() => _playingMessageId = message.id);
+    setState(() {
+      _playingMessageId = message.id;
+      _voiceProgress = 0;
+    });
     final ok = await _native.playEncryptedAudio(
       message.encryptedAudioData!,
       _encryption,
     );
-    if (!ok && mounted) {
-      setState(() => _playingMessageId = null);
+    if (!ok) {
+      _stopVoiceProgress();
+      if (mounted) setState(() => _playingMessageId = null);
+      return;
     }
+    _startVoiceProgress(message.audioDurationSeconds ?? 1);
   }
+
+  void _startVoiceProgress(int durationSeconds) {
+    _stopVoiceProgress();
+    final total = durationSeconds < 1 ? 1 : durationSeconds;
+    _voiceProgressTimer = Timer.periodic(const Duration(milliseconds: 200), (
+      timer,
+    ) {
+      if (!mounted) return;
+      setState(() {
+        _voiceProgress = (_voiceProgress + 0.2 / total).clamp(0.0, 1.0);
+      });
+      if (_voiceProgress >= 1.0) timer.cancel();
+    });
+  }
+
+  void _stopVoiceProgress() {
+    _voiceProgressTimer?.cancel();
+    _voiceProgressTimer = null;
+    _voiceProgress = 0;
+  }
+
+  /// m:ss
+  String _voiceClock(int seconds) =>
+      '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
   Future<void> _sendMessage({
     String? text,
@@ -2280,20 +2318,27 @@ class _ChatScreenState extends State<ChatScreen>
                               radius: 16,
                               backgroundColor: Colors.black12,
                               child: Icon(
-                                isPlayingVoice ? Icons.stop : Icons.play_arrow,
+                                isPlayingVoice ? Icons.pause : Icons.play_arrow,
                                 color: chatInk,
                                 size: 20,
                               ),
                             ),
                           ),
                           const SizedBox(width: 10),
+                          _VoiceWaveform(
+                            seed: message.id,
+                            progress: isPlayingVoice ? _voiceProgress : 0,
+                          ),
+                          const SizedBox(width: 10),
                           Text(
                             isPlayingVoice
-                                ? 'Playing encrypted audio...'
-                                : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
+                                ? '${_voiceClock((_voiceProgress * (message.audioDurationSeconds ?? 1)).round())} / ${_voiceClock(message.audioDurationSeconds ?? 1)}'
+                                : _voiceClock(
+                                    message.audioDurationSeconds ?? 1,
+                                  ),
                             style: const TextStyle(
                               color: chatInk,
-                              fontSize: 13,
+                              fontSize: 12,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -2472,6 +2517,63 @@ class _PendingSend {
 
   /// Set when the send failed, with a reason worth reading.
   String? error;
+}
+
+/// Deterministic pseudo-waveform for a voice note: seeded from the message
+/// id, so the same note always draws the same bars — stable across rebuilds
+/// and app launches, with no audio decoding and no network.
+List<double> voiceWaveformHeights(String seed, {int barCount = 24}) {
+  var hash = 0x811c9dc5;
+  for (final unit in seed.codeUnits) {
+    hash = ((hash ^ unit) * 0x01000193) & 0xFFFFFFFF;
+  }
+  final heights = <double>[];
+  for (var i = 0; i < barCount; i++) {
+    hash = (hash + 0x9e3779b9) & 0xFFFFFFFF;
+    final z = (hash ^ (hash >> 16)) & 0xFFFFFFFF;
+    heights.add(0.25 + (z % 1000) / 1000 * 0.75);
+  }
+  return heights;
+}
+
+/// The note's bars: played portion in accent green, the rest soft white.
+class _VoiceWaveform extends StatelessWidget {
+  final String seed;
+  final double progress;
+
+  static const double _height = 28;
+
+  const _VoiceWaveform({required this.seed, required this.progress});
+
+  @override
+  Widget build(BuildContext context) {
+    final heights = voiceWaveformHeights(seed);
+    return SizedBox(
+      width: 120,
+      height: _height,
+      child: Row(
+        children: [
+          for (var i = 0; i < heights.length; i++) ...[
+            if (i > 0) const SizedBox(width: 2),
+            Expanded(
+              child: Center(
+                child: Container(
+                  width: 3,
+                  height: (_height * heights[i]).clamp(6.0, _height),
+                  decoration: BoxDecoration(
+                    color: progress > 0 && i / heights.length <= progress
+                        ? chatGreen
+                        : Colors.white.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 class ChatMessage {
