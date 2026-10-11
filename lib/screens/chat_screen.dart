@@ -724,6 +724,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     String? imageUrl;
     if (image != null) {
       imageUrl = await _firebase.uploadImage(image);
+      if (imageUrl == null) {
+        // Storage rejected the upload (rules/size/network). Never push an
+        // empty message — tell the user instead.
+        _showErrorSnack('Image upload failed');
+        return;
+      }
     }
 
     await _firebase.sendMessage(
@@ -743,17 +749,43 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  void _showErrorSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _pickImage() async {
-    final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      await _sendMessage(image: File(image.path));
+    try {
+      // Downscale before upload: keeps files under the 5 MB Storage rule
+      // and makes uploads fast on mobile data.
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1280,
+        maxHeight: 1280,
+        imageQuality: 80,
+      );
+      if (image != null) {
+        await _sendMessage(image: File(image.path));
+      }
+    } catch (_) {
+      _showErrorSnack('Could not open the gallery');
     }
   }
 
   Future<void> _takePhoto() async {
-    final XFile? image = await _picker.pickImage(source: ImageSource.camera);
-    if (image != null) {
-      await _sendMessage(image: File(image.path));
+    try {
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1280,
+        maxHeight: 1280,
+        imageQuality: 80,
+      );
+      if (image != null) {
+        await _sendMessage(image: File(image.path));
+      }
+    } catch (_) {
+      _showErrorSnack('Could not open the camera');
     }
   }
 
