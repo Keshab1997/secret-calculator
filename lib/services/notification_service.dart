@@ -1,6 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 @pragma('vm:entry-point')
@@ -32,6 +32,14 @@ class NotificationService {
   /// Fixed notification ID so multiple SMS alerts replace the single banner
   /// instead of stacking suspicious multiple notifications on the lock screen.
   static const int disguisedNotificationId = 1997;
+
+  /// Android notification tag — together with [disguisedNotificationId] this
+  /// keeps every disguised alert in one replaceable slot.
+  static const String disguisedNotificationTag = 'calculator_sync';
+
+  /// Navigator key so a disguised alert tap can force the root Calculator
+  /// screen (wired up by `main.dart`).
+  final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
   /// Minimum interval between disguised alerts to keep notifications subtle.
   static const Duration minAlertCooldown = Duration(seconds: 25);
@@ -65,7 +73,10 @@ class NotificationService {
       iOS: iosSettings,
     );
 
-    await _notifications.initialize(initSettings);
+    await _notifications.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: _onNotificationTapped,
+    );
 
     final android = _notifications
         .resolvePlatformSpecificImplementation<
@@ -137,6 +148,12 @@ class NotificationService {
     _lastAlertMessageId = null;
   }
 
+  /// Tapping a disguised alert always opens the app at the root Calculator
+  /// screen — never a secret screen — even if the messaging stack is up.
+  void _onNotificationTapped(NotificationResponse response) {
+    navigatorKey.currentState?.popUntil((route) => route.isFirst);
+  }
+
   Future<void> showFakeNotification({
     String? customMessage,
     String? messageId,
@@ -153,6 +170,7 @@ class NotificationService {
       channelDescription: 'Calculator notifications',
       importance: Importance.high,
       priority: Priority.high,
+      tag: disguisedNotificationTag,
       onlyAlertOnce: true,
       showWhen: false,
       icon: '@mipmap/ic_launcher',
