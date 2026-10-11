@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/firebase_service.dart';
@@ -28,7 +29,8 @@ class CallScreen extends StatefulWidget {
   State<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends State<CallScreen> {
+class _CallScreenState extends State<CallScreen>
+    with SingleTickerProviderStateMixin {
   final FirebaseService _firebase = FirebaseService();
   final NativeBridgeService _native = NativeBridgeService();
 
@@ -89,6 +91,9 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _connectionWatchdog;
   Timer? _audioRouteSync;
 
+  /// Ringing halo behind the avatar, alive until the call connects.
+  late final AnimationController _ringPulse;
+
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
   MediaStream? _remoteStream;
@@ -126,6 +131,10 @@ class _CallScreenState extends State<CallScreen> {
       // Ring on this phone until accepted, declined or disposed.
       _native.startRingtone();
     }
+    _ringPulse = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat();
     _startRingTimer();
     _initCall();
   }
@@ -273,6 +282,7 @@ class _CallScreenState extends State<CallScreen> {
       if (newStatus == 'connected' && _callStatus != 'connected') {
         _ringTimer?.cancel();
         _startDurationTimer();
+        _stopRingPulse();
       }
       if (mounted && newStatus != _callStatus) {
         setState(() => _callStatus = newStatus);
@@ -375,6 +385,7 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _acceptIncomingCall() async {
     if (_accepting) return;
     _accepting = true;
+    HapticFeedback.lightImpact();
     _native.stopRingtone();
     try {
       final accepted = await _firebase.acceptCall();
@@ -385,6 +396,7 @@ class _CallScreenState extends State<CallScreen> {
         return;
       }
       if (mounted) {
+        _stopRingPulse();
         setState(() => _callStatus = 'connected');
         _ringTimer?.cancel();
         _startDurationTimer();
@@ -406,6 +418,7 @@ class _CallScreenState extends State<CallScreen> {
       : (_isCaller ? 'missed' : 'declined');
 
   Future<void> _endCall() async {
+    HapticFeedback.lightImpact();
     try {
       await _firebase.endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw);
     } catch (_) {}
@@ -494,11 +507,20 @@ class _CallScreenState extends State<CallScreen> {
     if (_disposed || !mounted || _callStatus == 'connected') return;
     _native.stopRingtone();
     _ringTimer?.cancel();
+    _stopRingPulse();
     setState(() => _callStatus = 'connected');
     _startDurationTimer();
   }
 
+  /// The halo belongs to the ringing phase only; a connected call shows a
+  /// still avatar.
+  void _stopRingPulse() {
+    if (_ringPulse.isAnimating) _ringPulse.stop();
+    _ringPulse.value = 0;
+  }
+
   void _toggleMute() {
+    HapticFeedback.lightImpact();
     setState(() => _isMuted = !_isMuted);
     for (final track in _localStream?.getAudioTracks() ?? const []) {
       track.enabled = !_isMuted;
@@ -507,6 +529,7 @@ class _CallScreenState extends State<CallScreen> {
 
   void _toggleCamera() {
     if (!widget.isVideo) return;
+    HapticFeedback.lightImpact();
     setState(() => _isCameraOff = !_isCameraOff);
     for (final track in _localStream?.getVideoTracks() ?? const []) {
       track.enabled = !_isCameraOff;
@@ -514,6 +537,7 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   Future<void> _toggleSpeaker() async {
+    HapticFeedback.lightImpact();
     setState(() => _isSpeakerOn = !_isSpeakerOn);
     await _applySpeaker();
   }
@@ -607,6 +631,7 @@ class _CallScreenState extends State<CallScreen> {
     _ringTimer?.cancel();
     _connectionWatchdog?.cancel();
     _audioRouteSync?.cancel();
+    _ringPulse.dispose();
     _callSub?.cancel();
     _teardownWebRTC();
     _native.stopAudio();
@@ -632,8 +657,41 @@ class _CallScreenState extends State<CallScreen> {
   }
 
   /// The avatar shown while there is no video to show: the app's gradient in
-  /// a ringed circle, WhatsApp-large and dead centre.
+  /// a ringed circle, WhatsApp-large and dead centre — with a halo that
+  /// breathes outward while the call is still ringing.
   Widget _buildAvatarStage() {
+    final avatar = _buildAvatar();
+    if (_callStatus == 'connected') return avatar;
+    return AnimatedBuilder(
+      animation: _ringPulse,
+      builder: (context, child) {
+        final t = Curves.easeOut.transform(_ringPulse.value);
+        return Stack(
+          alignment: Alignment.center,
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 150 + 44 * t,
+              height: 150 + 44 * t,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: Colors.white.withValues(alpha: 0.16 * (1 - t)),
+                  width: 1.5,
+                ),
+              ),
+            ),
+            child!,
+          ],
+        );
+      },
+      child: avatar,
+    );
+  }
+
+  /// The gradient disc itself, so the halo wrapper above can rebuild its
+  /// ring without rebuilding the avatar.
+  Widget _buildAvatar() {
     return Container(
       width: 150,
       height: 150,
@@ -775,14 +833,18 @@ class _CallScreenState extends State<CallScreen> {
                         ),
                       ),
                       const SizedBox(height: 3),
-                      Text(
-                        statusLabel,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
-                          shadows: [
-                            Shadow(blurRadius: 8, color: Colors.black54),
-                          ],
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: Text(
+                          statusLabel,
+                          key: ValueKey(_callStatus),
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 14,
+                            shadows: [
+                              Shadow(blurRadius: 8, color: Colors.black54),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -854,9 +916,13 @@ class _CallScreenState extends State<CallScreen> {
                 ),
               ),
               const SizedBox(height: 6),
-              Text(
-                statusLabel,
-                style: const TextStyle(color: Colors.white60, fontSize: 15),
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 220),
+                child: Text(
+                  statusLabel,
+                  key: ValueKey(_callStatus),
+                  style: const TextStyle(color: Colors.white60, fontSize: 15),
+                ),
               ),
 
               const Spacer(),
