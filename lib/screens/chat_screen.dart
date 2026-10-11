@@ -110,7 +110,7 @@ class _ChatScreenState extends State<ChatScreen>
   DateTime? _micDownAt;
   bool _micCancelArmed = false;
   String? _playingMessageId;
-  bool _isShowingIncomingCall = false;
+  bool _isShowingCall = false;
   bool _pickingExternalMedia = false;
 
   static const List<String> _reactionOptions = [
@@ -180,11 +180,12 @@ class _ChatScreenState extends State<ChatScreen>
     } else {
       _myReportedTyping = false;
       _firebase.updateOnlineStatus(false, isTyping: false);
-      if (state == AppLifecycleState.paused &&
+      if ((state == AppLifecycleState.paused ||
+              state == AppLifecycleState.hidden) &&
           !_pickingExternalMedia &&
           !_micStarting &&
           !_isRecordingVoice &&
-          !_isShowingIncomingCall) {
+          !_isShowingCall) {
         _quickHide();
       }
     }
@@ -202,8 +203,8 @@ class _ChatScreenState extends State<ChatScreen>
       if (status == 'ringing' &&
           callerId.isNotEmpty &&
           callerId != _firebase.myPeerId &&
-          !_isShowingIncomingCall) {
-        _isShowingIncomingCall = true;
+          !_isShowingCall) {
+        _isShowingCall = true;
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -211,7 +212,7 @@ class _ChatScreenState extends State<ChatScreen>
                 CallScreen(isVideo: isVideo, isIncoming: true),
           ),
         ).whenComplete(() {
-          _isShowingIncomingCall = false;
+          _isShowingCall = false;
         });
       }
     });
@@ -426,6 +427,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _quickHide() {
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
       _showEmojiPicker = false;
       _showStickerKeyboard = false;
@@ -820,7 +822,15 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _showCallOptions({bool isVideo = false}) {
-    Navigator.push(context, messagingRoute(CallScreen(isVideo: isVideo)));
+    // Outgoing calls share the incoming-call exemption: an active call must
+    // survive backgrounding (auto-lock) without being popped mid-call.
+    _isShowingCall = true;
+    Navigator.push(
+      context,
+      messagingRoute(CallScreen(isVideo: isVideo)),
+    ).whenComplete(() {
+      _isShowingCall = false;
+    });
   }
 
   void _showSecuritySettingsDialog() {
@@ -1380,10 +1390,15 @@ class _ChatScreenState extends State<ChatScreen>
             IconButton(
               tooltip: 'Video call',
               icon: const Icon(Icons.videocam_outlined),
-              onPressed: () => Navigator.push(
-                context,
-                messagingRoute(const CallScreen(isVideo: true)),
-              ),
+              onPressed: () {
+                _isShowingCall = true;
+                Navigator.push(
+                  context,
+                  messagingRoute(const CallScreen(isVideo: true)),
+                ).whenComplete(() {
+                  _isShowingCall = false;
+                });
+              },
             ),
             IconButton(
               tooltip: 'Voice call',
