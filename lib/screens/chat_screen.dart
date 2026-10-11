@@ -11,6 +11,8 @@ import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/emoji_keyboard.dart';
+import '../widgets/sticker_keyboard.dart';
 import 'call_screen.dart';
 import 'pairing_screen.dart';
 
@@ -102,13 +104,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _recordingTimer;
 
   bool _showEmojiPicker = false;
+  bool _showStickerKeyboard = false;
   bool _isSearching = false;
   String _searchQuery = '';
   bool _isPartnerOnline = false;
   bool _isPartnerTyping = false;
   String _partnerLastSeen = '';
   int _selectedThemeIndex = 0;
-  int _selectedEmojiCategory = 0;
   int? _disappearingSeconds;
   ChatMessage? _replyingTo;
 
@@ -132,99 +134,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     '🎉',
     '🙏',
   ];
-
-  static const Map<String, List<String>> _emojiCategories = {
-    'Smileys': [
-      '😀',
-      '😂',
-      '🤣',
-      '😍',
-      '🥰',
-      '😘',
-      '😊',
-      '😉',
-      '😎',
-      '🤩',
-      '🥳',
-      '😋',
-      '🤪',
-      '😜',
-      '🤗',
-      '🤔',
-    ],
-    'Love': [
-      '❤️',
-      '💕',
-      '💖',
-      '💗',
-      '💓',
-      '💘',
-      '💝',
-      '💞',
-      '💌',
-      '🌹',
-      '🫶',
-      '💋',
-      '🥺',
-      '🫂',
-      '✨',
-      '🌙',
-    ],
-    'Hype': [
-      '🔥',
-      '⚡',
-      '🌟',
-      '💫',
-      '🎉',
-      '🎊',
-      '🚀',
-      '💯',
-      '👑',
-      '💎',
-      '🎯',
-      '🏆',
-      '🎶',
-      '🍕',
-      '☕',
-      '🍿',
-    ],
-    'Hands': [
-      '👍',
-      '👎',
-      '👏',
-      '🙌',
-      '💪',
-      '🤝',
-      '🙏',
-      '✌️',
-      '🤞',
-      '👌',
-      '🫡',
-      '👋',
-      '🫶',
-      '☝️',
-      '✊',
-      '🤙',
-    ],
-    'Secret': [
-      '🤫',
-      '🔒',
-      '🗝️',
-      '🕵️',
-      '👀',
-      '🕶️',
-      '🛡️',
-      '🧮',
-      '📵',
-      '⏳',
-      '💣',
-      '👻',
-      '🥷',
-      '🎭',
-      '📡',
-      '✅',
-    ],
-  };
 
   ChatThemePalette get _theme => ChatThemePalette.presets[_selectedThemeIndex];
 
@@ -1313,9 +1222,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final displayedMessages = _filteredMessages;
-    final emojiCategoryKeys = _emojiCategories.keys.toList();
-    final currentEmojis =
-        _emojiCategories[emojiCategoryKeys[_selectedEmojiCategory]]!;
     final hasTypedText = _messageController.text.trim().isNotEmpty;
 
     return Scaffold(
@@ -1640,72 +1546,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
           ),
           if (_showEmojiPicker)
-            Container(
-              height: 230,
-              color: _theme.appBarColor,
-              child: Column(
-                children: [
-                  SizedBox(
-                    height: 40,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      itemCount: emojiCategoryKeys.length,
-                      itemBuilder: (context, idx) {
-                        final selected = idx == _selectedEmojiCategory;
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 4,
-                            vertical: 6,
-                          ),
-                          child: ChoiceChip(
-                            label: Text(emojiCategoryKeys[idx]),
-                            selected: selected,
-                            selectedColor: _theme.accentColor.withValues(
-                              alpha: 0.3,
-                            ),
-                            onSelected: (_) {
-                              setState(() => _selectedEmojiCategory = idx);
-                            },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Expanded(
-                    child: GridView.builder(
-                      padding: const EdgeInsets.all(8),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 8,
-                            childAspectRatio: 1,
-                          ),
-                      itemCount: currentEmojis.length,
-                      itemBuilder: (context, index) {
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _messageController.text += currentEmojis[index];
-                              _messageController.selection =
-                                  TextSelection.fromPosition(
-                                    TextPosition(
-                                      offset: _messageController.text.length,
-                                    ),
-                                  );
-                            });
-                          },
-                          child: Center(
-                            child: Text(
-                              currentEmojis[index],
-                              style: const TextStyle(fontSize: 24),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              ),
+            EmojiKeyboard(
+              onEmojiSelected: (emoji) {
+                setState(() {
+                  _messageController.text += emoji.emoji;
+                  _messageController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _messageController.text.length),
+                  );
+                });
+              },
+              backgroundColor: _theme.appBarColor,
+            ),
+          if (_showStickerKeyboard)
+            StickerKeyboard(
+              onStickerSelected: (emoji) {
+                setState(() {
+                  _messageController.text += emoji;
+                  _messageController.selection = TextSelection.fromPosition(
+                    TextPosition(offset: _messageController.text.length),
+                  );
+                });
+              },
             ),
           if (_replyingTo != null)
             Container(
@@ -1773,7 +1634,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ? null
                         : () {
                             setState(() {
+                              _showStickerKeyboard = false;
                               _showEmojiPicker = !_showEmojiPicker;
+                            });
+                          },
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      _showStickerKeyboard ? Icons.keyboard : Icons.emoji_objects_outlined,
+                      color: _theme.accentColor,
+                    ),
+                    onPressed: _isRecordingVoice
+                        ? null
+                        : () {
+                            setState(() {
+                              _showEmojiPicker = false;
+                              _showStickerKeyboard = !_showStickerKeyboard;
                             });
                           },
                   ),

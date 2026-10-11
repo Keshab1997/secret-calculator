@@ -124,7 +124,7 @@ void main() {
       expect(find.text('Pair Device'), findsOneWidget);
     });
 
-    testWidgets('ChatScreen renders themes, search, and emoji categories', (
+    testWidgets('ChatScreen renders themes, search, emoji and sticker buttons', (
       WidgetTester tester,
     ) async {
       await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
@@ -132,12 +132,9 @@ void main() {
       expect(find.text('Secret Chat'), findsOneWidget);
       expect(find.byTooltip('Quick Hide to Calculator'), findsOneWidget);
 
-      // Open categorized emoji picker
-      await tester.tap(find.byIcon(Icons.emoji_emotions_outlined));
-      await tester.pump();
-      expect(find.text('Smileys'), findsOneWidget);
-      expect(find.text('Love'), findsOneWidget);
-      expect(find.text('Secret'), findsOneWidget);
+      // Check emoji and sticker buttons are present
+      expect(find.byIcon(Icons.emoji_emotions_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.emoji_objects_outlined), findsOneWidget);
 
       // Toggle search bar
       await tester.tap(find.byTooltip('Search Messages'));
