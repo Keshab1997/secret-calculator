@@ -124,8 +124,13 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
     try {
       await _service.selectRoom(code);
       if (!mounted) return;
+      final profile = _service.partnerProfile(code, _rooms[code]?['profiles']);
       final route = messagingRoute(
-        CallScreen(isVideo: video, isIncoming: true),
+        CallScreen(
+          isVideo: video,
+          isIncoming: true,
+          contactName: profile['name'],
+        ),
       );
       await Navigator.of(context).push(route);
       await route.completed;
@@ -149,7 +154,7 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
                 contactName: profile['name'] ?? 'Paired contact',
                 contactPhoto: profile['photo'],
               )
-            : CallScreen(isVideo: video),
+            : CallScreen(isVideo: video, contactName: profile['name']),
       );
       await Navigator.of(context).push(route);
       await route.completed;

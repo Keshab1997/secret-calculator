@@ -12,7 +12,17 @@ class CallScreen extends StatefulWidget {
   final bool isVideo;
   final bool isIncoming;
 
-  const CallScreen({super.key, required this.isVideo, this.isIncoming = false});
+  /// Display name of the other side, taken from their published profile.
+  /// Falls back to a neutral label when the profile has no name yet (or an
+  /// older client never published one).
+  final String? contactName;
+
+  const CallScreen({
+    super.key,
+    required this.isVideo,
+    this.isIncoming = false,
+    this.contactName,
+  });
 
   @override
   State<CallScreen> createState() => _CallScreenState();
@@ -599,6 +609,13 @@ class _CallScreenState extends State<CallScreen> {
     super.dispose();
   }
 
+  /// The name shown on the call screen: the partner's profile name when it
+  /// is known, otherwise the neutral placeholder.
+  String get _partnerName {
+    final name = widget.contactName?.trim();
+    return (name == null || name.isEmpty) ? 'Secret Partner' : name;
+  }
+
   String _formatDuration(int totalSeconds) {
     final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
     final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
@@ -731,9 +748,9 @@ class _CallScreenState extends State<CallScreen> {
                     children: [
                       _buildTypeRow(),
                       const SizedBox(height: 10),
-                      const Text(
-                        'Secret Partner',
-                        style: TextStyle(
+                      Text(
+                        _partnerName,
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 22,
                           fontWeight: FontWeight.bold,
@@ -814,9 +831,9 @@ class _CallScreenState extends State<CallScreen> {
             _buildAvatarStage(),
 
             const SizedBox(height: 28),
-            const Text(
-              'Secret Partner',
-              style: TextStyle(
+            Text(
+              _partnerName,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 26,
                 fontWeight: FontWeight.bold,

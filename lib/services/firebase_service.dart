@@ -650,6 +650,23 @@ class FirebaseService {
     }
   }
 
+  /// The paired partner's published profile name, or null when the profile is
+  /// missing or carries no name (older clients never published one).
+  ///
+  /// A screen that watches only the `call` node (the calculator's incoming
+  /// ring) has no profile snapshot to read, so it asks this once before
+  /// pushing [CallScreen].
+  Future<String?> partnerName(String room) async {
+    if (Firebase.apps.isEmpty) return null;
+    try {
+      final snapshot = await _db.ref('rooms/$room/profiles').get();
+      final name = partnerProfile(room, snapshot.value)['name']?.trim();
+      return (name == null || name.isEmpty) ? null : name;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Ends or declines the active call in the current room and logs it in the
   /// chat history.
   ///

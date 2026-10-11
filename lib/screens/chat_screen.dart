@@ -208,8 +208,11 @@ class _ChatScreenState extends State<ChatScreen>
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) =>
-                CallScreen(isVideo: isVideo, isIncoming: true),
+            builder: (context) => CallScreen(
+              isVideo: isVideo,
+              isIncoming: true,
+              contactName: widget.contactName,
+            ),
           ),
         ).whenComplete(() {
           _isShowingCall = false;
@@ -828,7 +831,9 @@ class _ChatScreenState extends State<ChatScreen>
     _isShowingCall = true;
     Navigator.push(
       context,
-      messagingRoute(CallScreen(isVideo: isVideo)),
+      messagingRoute(
+        CallScreen(isVideo: isVideo, contactName: widget.contactName),
+      ),
     ).whenComplete(() {
       _isShowingCall = false;
     });
@@ -1395,7 +1400,9 @@ class _ChatScreenState extends State<ChatScreen>
                 _isShowingCall = true;
                 Navigator.push(
                   context,
-                  messagingRoute(const CallScreen(isVideo: true)),
+                  messagingRoute(
+                    CallScreen(isVideo: true, contactName: widget.contactName),
+                  ),
                 ).whenComplete(() {
                   _isShowingCall = false;
                 });

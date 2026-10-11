@@ -144,9 +144,19 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       if (!mounted) return;
       _notifications.showFakeNotification(messageId: 'call_$ringId');
       unawaited(_native.setSecureScreen(true));
+      // This screen watches the call node only, so ask for the partner's
+      // profile name before the call screen needs it.
+      final contactName = await _firebase.partnerName(code);
+      if (!mounted) return;
       await Navigator.push(
         context,
-        messagingRoute(CallScreen(isVideo: isVideo, isIncoming: true)),
+        messagingRoute(
+          CallScreen(
+            isVideo: isVideo,
+            isIncoming: true,
+            contactName: contactName,
+          ),
+        ),
       );
     } catch (_) {
       // The node-driven UI catches up on the next snapshot; a missed call is
