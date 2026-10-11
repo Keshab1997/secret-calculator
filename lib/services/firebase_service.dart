@@ -79,6 +79,7 @@ class FirebaseService {
   final ValueNotifier<String> callAlertNotifier = ValueNotifier<String>(
     'sound',
   );
+  String? _lastSeenRelease;
   final EncryptionService _encryption = EncryptionService();
 
   /// When set, the next [sendMessage] throws this instead of writing: the
@@ -122,6 +123,17 @@ class FirebaseService {
 
   /// Live view of [callAlert] for settings UI.
   ValueListenable<String> get callAlertChanged => callAlertNotifier;
+
+  /// Release tag whose "what's new" notes were already shown, so they are
+  /// not shown again on the next launch.
+  String? get lastSeenRelease => _lastSeenRelease;
+
+  /// Marks [tag]'s release notes as shown so they are not shown again.
+  Future<void> markReleaseSeen(String tag) async {
+    if (_lastSeenRelease == tag) return;
+    _lastSeenRelease = tag;
+    await _saveState();
+  }
 
   FirebaseDatabase get _db {
     final db = FirebaseDatabase.instanceFor(
@@ -253,6 +265,10 @@ class FirebaseService {
           _callAlert = savedAlert as String;
         }
         callAlertNotifier.value = _callAlert;
+        final savedSeenRelease = decoded['lastSeenRelease'];
+        if (savedSeenRelease is String && savedSeenRelease.isNotEmpty) {
+          _lastSeenRelease = savedSeenRelease;
+        }
         final rooms = decoded['pairedRooms'];
         if (rooms is Map) {
           for (final entry in rooms.entries) {
@@ -310,6 +326,7 @@ class FirebaseService {
           'disappearingSeconds': _disappearingSeconds,
           'darkMode': _themeMode.name,
           'callAlert': _callAlert,
+          'lastSeenRelease': _lastSeenRelease,
         }),
       );
     } catch (_) {

@@ -1,4 +1,6 @@
+import 'package:calculator/screens/chats_screen.dart';
 import 'package:calculator/screens/profile_screen.dart';
+import 'package:calculator/services/firebase_service.dart';
 import 'package:calculator/services/update_service.dart';
 import 'package:calculator/widgets/messaging_style.dart';
 import 'package:flutter/material.dart';
@@ -81,6 +83,30 @@ void main() {
     });
   });
 
+  group('latestReleaseInfo', () {
+    test('reads the tag (minus the v) and the notes body', () {
+      const release = <String, Object>{
+        'tag_name': 'v1.2.0',
+        'body': '  Bug fixes and a love sticker pack.  ',
+      };
+      final info = UpdateService.latestReleaseInfo(release);
+      expect(info, isNotNull);
+      expect(info!.tag, '1.2.0');
+      expect(info.notes, 'Bug fixes and a love sticker pack.');
+    });
+
+    test('an empty body leaves notes null', () {
+      const release = <String, Object>{'tag_name': 'v1.2.0', 'body': '   '};
+      final info = UpdateService.latestReleaseInfo(release);
+      expect(info, isNotNull);
+      expect(info!.notes, isNull);
+    });
+
+    test('a release without a tag is ignored', () {
+      expect(UpdateService.latestReleaseInfo(const <String, Object>{}), isNull);
+    });
+  });
+
   testWidgets('profile tile offers the download when an update exists', (
     tester,
   ) async {
@@ -158,5 +184,63 @@ void main() {
       );
     }
     expect(find.text('v1.0.0 — up to date'), findsOneWidget);
+  });
+
+  group('ChatsScreen release notes', () {
+    final service = FirebaseService();
+
+    setUp(() async {
+      // Real-zone write: start each test from a known, already-seen tag.
+      await service.markReleaseSeen('0.0.0');
+    });
+
+    testWidgets('shows the notes once for a freshly installed build', (
+      tester,
+    ) async {
+      UpdateService.checkOverride = () async => const AppUpdateStatus(
+        currentVersion: '1.1.0',
+        latestTag: '1.1.0',
+        latestNotes: 'New: love stickers\nFaster calls',
+      );
+      addTearDown(() => UpdateService.checkOverride = null);
+
+      await tester.pumpWidget(
+        MaterialApp(theme: messagingTheme, home: const ChatsScreen()),
+      );
+      // One pump lets the check's microtask run and request the dialog;
+      // the next frames build and animate it in.
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('What’s new in 1.1.0'), findsOneWidget);
+      expect(find.text('New: love stickers\nFaster calls'), findsOneWidget);
+
+      await tester.tap(find.text('Okay'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('What’s new in 1.1.0'), findsNothing);
+    });
+
+    testWidgets('does not repeat notes that were already seen', (tester) async {
+      // Real-zone write (the state file is real I/O, which the fake-async
+      // test zone never completes).
+      await tester.runAsync(() => service.markReleaseSeen('1.1.0'));
+      UpdateService.checkOverride = () async => const AppUpdateStatus(
+        currentVersion: '1.1.0',
+        latestTag: '1.1.0',
+        latestNotes: 'New: love stickers',
+      );
+      addTearDown(() => UpdateService.checkOverride = null);
+
+      await tester.pumpWidget(
+        MaterialApp(theme: messagingTheme, home: const ChatsScreen()),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('What’s new in 1.1.0'), findsNothing);
+    });
   });
 }

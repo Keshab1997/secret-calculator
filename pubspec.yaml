@@ -47,6 +47,7 @@ dependencies:
   flutter_webrtc: ^1.6.2+hotfix.4
   local_auth: ^3.0.2
   firebase_messaging: ^15.2.10
+  firebase_crashlytics: ^4.0.0
   emoji_picker_flutter: ^4.5.4
   # App updates: read the installed version and open the release download.
   package_info_plus: ^8.0.0

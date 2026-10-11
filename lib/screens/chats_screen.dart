@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
+import '../services/update_service.dart';
 import '../widgets/messaging_style.dart';
 import 'chat_screen.dart';
 import 'call_screen.dart';
@@ -45,7 +46,45 @@ class _ChatsScreenState extends State<ChatsScreen>
     )..forward();
     if (!widget.decoyMode) {
       _subscribe();
+      _maybeShowReleaseNotes();
     }
+  }
+
+  /// Right after installing a newer build, the latest release matches the
+  /// installed version — its notes are the "what's new" for this launch.
+  /// Shown once per tag (remembered in the local state file); a pending
+  /// update is left to the profile's version tile.
+  Future<void> _maybeShowReleaseNotes() async {
+    final status = await UpdateService.checkForUpdate();
+    if (!mounted) return;
+    final tag = status.latestTag;
+    if (tag == null || status.hasUpdate) return;
+    if (_service.lastSeenRelease == tag) return;
+    // Fire-and-forget: the state-file write must never hold up the dialog.
+    unawaited(_service.markReleaseSeen(tag));
+    if (!mounted) return;
+    _showReleaseNotesDialog(tag, status.latestNotes);
+  }
+
+  void _showReleaseNotesDialog(String tag, String? notes) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('What’s new in $tag'),
+        content: SingleChildScrollView(
+          child: Text(
+            (notes ?? 'Bug fixes and improvements.').trim(),
+            style: Theme.of(dialogContext).textTheme.bodyMedium,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Okay'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

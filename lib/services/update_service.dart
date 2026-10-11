@@ -27,13 +27,25 @@ class AppUpdateInfo {
 
 /// The outcome of one update check.
 class AppUpdateStatus {
-  const AppUpdateStatus({this.currentVersion, this.update});
+  const AppUpdateStatus({
+    this.currentVersion,
+    this.update,
+    this.latestTag,
+    this.latestNotes,
+  });
 
   /// Installed version from the package manifest, when readable.
   final String? currentVersion;
 
   /// Non-null when the latest release is newer than the installed build.
   final AppUpdateInfo? update;
+
+  /// The latest release tag even when it is not newer — the notes for it
+  /// are the "what's new" to show right after installing that version.
+  final String? latestTag;
+
+  /// Release notes (the GitHub release body) for [latestTag].
+  final String? latestNotes;
 
   bool get hasUpdate => update != null;
 }
@@ -72,12 +84,18 @@ abstract final class UpdateService {
       // Without the installed version there is nothing to compare.
     }
     final release = await _fetchLatestRelease();
-    if (current == null || release == null) {
+    if (release == null) {
       return AppUpdateStatus(currentVersion: current);
     }
+    final latest = latestReleaseInfo(release);
+    final AppUpdateInfo? update = current == null
+        ? null
+        : latestReleaseUpdate(release, currentVersion: current);
     return AppUpdateStatus(
       currentVersion: current,
-      update: latestReleaseUpdate(release, currentVersion: current),
+      update: update,
+      latestTag: latest?.tag,
+      latestNotes: latest?.notes,
     );
   }
 
@@ -125,14 +143,26 @@ abstract final class UpdateService {
     }
   }
 
+  /// The tag and notes of a release, regardless of whether it is newer.
+  static ({String tag, String? notes})? latestReleaseInfo(
+    Map<String, Object?> release,
+  ) {
+    final rawTag = release['tag_name']?.toString() ?? '';
+    if (rawTag.isEmpty) return null;
+    final tag = rawTag.startsWith('v') ? rawTag.substring(1) : rawTag;
+    final body = release['body']?.toString() ?? '';
+    return (tag: tag, notes: body.trim().isEmpty ? null : body.trim());
+  }
+
   /// Pure parse + compare: latest-release JSON → an [AppUpdateInfo] when
   /// the release tag beats [currentVersion].
   static AppUpdateInfo? latestReleaseUpdate(
     Map<String, Object?> release, {
     required String currentVersion,
   }) {
-    final rawTag = release['tag_name']?.toString() ?? '';
-    final version = rawTag.startsWith('v') ? rawTag.substring(1) : rawTag;
+    final info = latestReleaseInfo(release);
+    if (info == null) return null;
+    final version = info.tag;
     if (!isVersionNewer(version, currentVersion)) return null;
     final pageUrl = release['html_url']?.toString() ?? '';
     if (pageUrl.isEmpty) return null;
