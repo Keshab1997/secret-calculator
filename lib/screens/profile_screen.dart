@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../services/firebase_service.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/option_sheet.dart';
 import '../widgets/security_settings.dart';
@@ -85,8 +86,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'photo': ?_photo,
       });
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Profile saved')));
+        AppToast.show(context, 'Profile saved', kind: AppToastKind.success);
       }
     } catch (_) {
       if (mounted) {

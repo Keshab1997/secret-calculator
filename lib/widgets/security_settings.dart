@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/firebase_service.dart';
+import 'app_toast.dart';
 import 'messaging_style.dart';
 
 /// The device-wide unlock settings: the custom secret code and the biometric
@@ -88,12 +89,10 @@ Future<void> showSecuritySettingsSheet(BuildContext context) async {
               if (!dialogContext.mounted) return;
               Navigator.pop(dialogContext);
               if (!context.mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Saved! Passcode: ${service.customPasscode} • Biometric: ${bioEnabled ? "ON" : "OFF"}',
-                  ),
-                ),
+              AppToast.show(
+                context,
+                'Saved! Passcode: ${service.customPasscode} • Biometric: ${bioEnabled ? "ON" : "OFF"}',
+                kind: AppToastKind.success,
               );
             },
             child: const Text('SAVE'),

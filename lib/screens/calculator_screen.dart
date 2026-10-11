@@ -11,6 +11,7 @@ import '../services/calculator_history_store.dart';
 import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/messaging_style.dart';
 import 'call_screen.dart';
 import 'chats_screen.dart';
@@ -185,7 +186,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   void _notice(String text) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    AppToast.show(context, text);
   }
 
   Future<void> _copy(String value) async {

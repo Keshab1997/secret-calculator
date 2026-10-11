@@ -13,6 +13,7 @@ import '../services/firebase_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
+import '../widgets/app_toast.dart';
 import '../widgets/emoji_keyboard.dart';
 import '../widgets/option_sheet.dart';
 import '../widgets/sticker_keyboard.dart';
@@ -511,16 +512,20 @@ class _ChatScreenState extends State<ChatScreen>
     final granted = await _native.ensureMicPermission();
     if (!granted) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Microphone permission is required')),
+      AppToast.show(
+        context,
+        'Microphone permission is required',
+        kind: AppToastKind.warning,
       );
       return;
     }
     final path = await _native.startRecording();
     if (path == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not start voice recording')),
+        AppToast.show(
+          context,
+          'Could not start voice recording',
+          kind: AppToastKind.error,
         );
       }
       return;
@@ -531,9 +536,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (!_micHeld || !mounted) {
       final stale = await _native.stopRecording();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hold to record a voice note')),
-        );
+        AppToast.show(context, 'Hold to record a voice note');
       }
       if (stale != null) {
         try {
@@ -600,9 +603,7 @@ class _ChatScreenState extends State<ChatScreen>
     } else {
       _cancelVoiceRecording();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Hold to record a voice note')),
-        );
+        AppToast.show(context, 'Hold to record a voice note');
       }
     }
   }
@@ -863,10 +864,9 @@ class _ChatScreenState extends State<ChatScreen>
     return 'Message could not be sent. Please try again.';
   }
 
-  void _showErrorSnack(String message) {
+  void _showErrorToast(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    AppToast.show(context, message, kind: AppToastKind.error);
   }
 
   Future<void> _handleKeyboardContent(KeyboardInsertedContent content) async {
@@ -879,7 +879,7 @@ class _ChatScreenState extends State<ChatScreen>
       await tempFile.writeAsBytes(data, flush: true);
       await _sendMessage(image: tempFile);
     } catch (_) {
-      _showErrorSnack('Could not send keyboard sticker');
+      _showErrorToast('Could not send keyboard sticker');
     }
   }
 
@@ -898,7 +898,7 @@ class _ChatScreenState extends State<ChatScreen>
         await _sendMessage(image: File(image.path));
       }
     } catch (_) {
-      _showErrorSnack('Could not open the gallery');
+      _showErrorToast('Could not open the gallery');
     } finally {
       _pickingExternalMedia = false;
     }
@@ -917,7 +917,7 @@ class _ChatScreenState extends State<ChatScreen>
         await _sendMessage(image: File(image.path));
       }
     } catch (_) {
-      _showErrorSnack('Could not open the camera');
+      _showErrorToast('Could not open the camera');
     } finally {
       _pickingExternalMedia = false;
     }
@@ -1141,11 +1141,11 @@ class _ChatScreenState extends State<ChatScreen>
       case 'copy':
         await Clipboard.setData(ClipboardData(text: message.text!));
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Message copied to clipboard'),
-            duration: Duration(seconds: 1),
-          ),
+        AppToast.show(
+          context,
+          'Message copied to clipboard',
+          kind: AppToastKind.success,
+          duration: const Duration(seconds: 1),
         );
         break;
       case 'delete':
@@ -1370,11 +1370,11 @@ class _ChatScreenState extends State<ChatScreen>
                       ? null
                       : () {
                           Clipboard.setData(ClipboardData(text: code));
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Room code copied!'),
-                              duration: Duration(seconds: 1),
-                            ),
+                          AppToast.show(
+                            context,
+                            'Room code copied!',
+                            kind: AppToastKind.success,
+                            duration: const Duration(seconds: 1),
                           );
                         },
                 ),

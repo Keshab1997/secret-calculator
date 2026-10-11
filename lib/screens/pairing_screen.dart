@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../services/firebase_service.dart';
+import '../widgets/app_toast.dart';
 import 'chat_screen.dart';
 import '../widgets/messaging_style.dart';
 
@@ -186,8 +187,7 @@ class _PairingScreenState extends State<PairingScreen> {
     if (code == null) return;
     await Clipboard.setData(ClipboardData(text: code));
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Pairing code copied')));
+    AppToast.show(context, 'Pairing code copied', kind: AppToastKind.success);
   }
 
   @override

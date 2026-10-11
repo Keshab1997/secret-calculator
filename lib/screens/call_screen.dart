@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/firebase_service.dart';
+import '../widgets/app_toast.dart';
 import '../services/native_bridge_service.dart';
 
 class CallScreen extends StatefulWidget {
@@ -432,8 +433,7 @@ class _CallScreenState extends State<CallScreen>
       await _firebase.endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw);
     } catch (_) {}
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Call unavailable')));
+    AppToast.show(context, 'Call unavailable', kind: AppToastKind.error);
     Navigator.of(context).pop();
   }
 
