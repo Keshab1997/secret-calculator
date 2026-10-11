@@ -704,15 +704,23 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     ),
   );
 
-  @override
-  Widget build(BuildContext context) => Theme(
-    data: ThemeData.dark(useMaterial3: true).copyWith(
+  /// The calculator wears the same bundled type family as the hidden side,
+  /// but stays a plain dark calculator — nothing here should look decorated.
+  ThemeData get _calculatorTheme {
+    final base = ThemeData.dark(useMaterial3: true);
+    return base.copyWith(
       colorScheme: ColorScheme.fromSeed(
         seedColor: _accent,
         brightness: Brightness.dark,
       ),
       scaffoldBackgroundColor: _background,
-    ),
+      textTheme: base.textTheme.apply(fontFamily: appFontFamily),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: _calculatorTheme,
     child: Scaffold(
       backgroundColor: _background,
       appBar: AppBar(

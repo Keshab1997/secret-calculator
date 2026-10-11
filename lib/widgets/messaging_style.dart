@@ -5,6 +5,11 @@ import '../services/media_cache_service.dart';
 const chatGreen = Color(0xFF1DAA61);
 const chatInk = Color(0xFF172126);
 
+/// The app's type family. Bundled (see pubspec.yaml) so it is identical on
+/// every device and available on the first frame; every ThemeData in the app
+/// spreads this name so the calculator and the hidden side share one voice.
+const appFontFamily = 'Inter';
+
 /// One type scale for the whole messaging side — headers, list rows, message
 /// bodies, captions. Every screen reads from it instead of inventing sizes,
 /// which is what makes the app feel deliberate rather than assembled.
@@ -34,11 +39,12 @@ const messagingTextTheme = TextTheme(
 
 final messagingTheme = ThemeData(
   useMaterial3: true,
+  fontFamily: appFontFamily,
   colorScheme: ColorScheme.fromSeed(
     seedColor: chatGreen,
     brightness: Brightness.light,
   ),
-  textTheme: messagingTextTheme,
+  textTheme: messagingTextTheme.apply(fontFamily: appFontFamily),
   scaffoldBackgroundColor: Colors.white,
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.white,

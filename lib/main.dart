@@ -3,6 +3,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/calculator_screen.dart';
+import 'widgets/messaging_style.dart';
 import 'services/firebase_service.dart';
 import 'services/notification_service.dart';
 
@@ -32,6 +33,7 @@ class CalculatorApp extends StatelessWidget {
           brightness: Brightness.dark,
         ),
         useMaterial3: true,
+        fontFamily: appFontFamily,
       ),
       home: const CalculatorScreen(),
     );
