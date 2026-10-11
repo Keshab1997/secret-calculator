@@ -630,6 +630,26 @@ class FirebaseService {
     return true;
   }
 
+  /// True when the live call node has been answered — `status` is
+  /// `connected`, or a `connectedAt` stamp exists.
+  ///
+  /// The ring timeout races the other phone's accept right at the deadline,
+  /// so it asks this before ending a call: an answered call must never be
+  /// closed as missed. A missing (or unreadable) node counts as not
+  /// connected, which is what the timeout already assumed.
+  Future<bool> isCallConnected() async {
+    if (_roomId == null || Firebase.apps.isEmpty) return false;
+    try {
+      final snapshot = await _db.ref('rooms/$_roomId/call').get();
+      final value = snapshot.value;
+      if (value is! Map) return false;
+      return value['status']?.toString() == 'connected' ||
+          value['connectedAt'] != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Ends or declines the active call in the current room and logs it in the
   /// chat history.
   ///

@@ -38,7 +38,12 @@ class _CallScreenState extends State<CallScreen> {
   /// How long a call may ring before it is logged as missed and closed on
   /// both sides — an offline callee must not leave the caller "Ringing…"
   /// forever.
-  static const Duration ringTimeout = Duration(seconds: 45);
+  ///
+  /// Long enough to outlast a slow incoming screen: at 45s a callee whose
+  /// phone started ringing late was still answering when this fired, and the
+  /// timeout closed the call in their hand. An answered call is never cut by
+  /// it either way (see [_onRingTimeout]).
+  static const Duration ringTimeout = Duration(seconds: 60);
 
   /// 720p@30 capture target. Android already defaults to 1280x720, but the
   /// native parsers take plain numbers (their `ideal`-map handling is
@@ -423,12 +428,42 @@ class _CallScreenState extends State<CallScreen> {
 
   /// Nobody accepted in time: log the call as missed (even if this side is
   /// the callee — ringing out is not a decline) and close on both sides.
+  ///
+  /// The other phone's accept and this timer race at the deadline, and the
+  /// worst outcome of that race is deleting a call the partner just answered
+  /// — it drops a live call on both phones. So an answered call is adopted
+  /// instead of ended: the local copy of the node settles the common case
+  /// without a round-trip, and a fresh read covers the rest.
   Future<void> _onRingTimeout() async {
     if (_disposed || _isClosing || _callStatus == 'connected') return;
+    if (_localCallIsConnected() || await _firebase.isCallConnected()) {
+      _markConnected();
+      return;
+    }
     try {
       await _firebase.endCall(outcome: 'missed', callInfo: _lastCallRaw);
     } catch (_) {}
     _closeCallScreen();
+  }
+
+  /// True when the newest snapshot of the call node says it was answered.
+  bool _localCallIsConnected() {
+    final raw = _lastCallRaw;
+    if (raw == null) return false;
+    return raw['status']?.toString() == 'connected' ||
+        raw['connectedAt'] != null;
+  }
+
+  /// Moves the screen to the in-call UI when the call turns out to be
+  /// answered even though the status change never reached it — without this
+  /// the screen would keep the ringing layout (and the ringtone) on a live
+  /// call.
+  void _markConnected() {
+    if (_disposed || !mounted || _callStatus == 'connected') return;
+    _native.stopRingtone();
+    _ringTimer?.cancel();
+    setState(() => _callStatus = 'connected');
+    _startDurationTimer();
   }
 
   void _toggleMute() {
