@@ -8,10 +8,12 @@ import 'package:flutter/material.dart';
 import 'screens/calculator_screen.dart';
 import 'widgets/messaging_style.dart';
 import 'services/firebase_service.dart';
+import 'services/native_bridge_service.dart';
 import 'services/notification_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await NativeBridgeService().cleanupStaleVoicePlaybackFiles();
   await Firebase.initializeApp();
 
   // Report uncaught errors to Crashlytics: framework errors come through
@@ -28,7 +30,15 @@ void main() async {
   };
 
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-  await FirebaseService().loadSavedState();
+  final firebaseService = FirebaseService();
+  try {
+    await firebaseService.ensureAuthenticated();
+  } catch (error) {
+    // Keep the calculator usable even if Anonymous Auth has not yet been
+    // enabled in Firebase Console; secure pairing will explain the setup need.
+    debugPrint('Firebase anonymous sign-in unavailable: $error');
+  }
+  await firebaseService.loadSavedState();
   await NotificationService().initialize();
   // Fire-and-forget: publishes the FCM token for closed-app notifications.
   FirebaseService().registerFcmToken();

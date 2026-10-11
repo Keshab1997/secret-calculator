@@ -1,27 +1,26 @@
+import 'dart:collection';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 
-/// Persistent disk + in-memory cache for chat photos and base64 profile avatars.
-///
-/// Avoids re-downloading Firebase Storage images or re-decoding base64 avatars
-/// on every scroll/rebuild, reducing Firebase Storage egress bandwidth.
+import 'firebase_service.dart';
+
+/// Bounded in-memory cache for decrypted chat photos and profile avatars.
+/// Decrypted media is deliberately never written to the app's cache directory.
 class MediaCacheService {
   static final MediaCacheService _instance = MediaCacheService._internal();
   factory MediaCacheService() => _instance;
   MediaCacheService._internal();
 
-  @visibleForTesting
-  Directory? cacheDirOverride;
-
   final Map<String, MemoryImage> _avatarMemoryCache = {};
-  final Map<String, File> _resolvedFileCache = {};
-  final Map<String, Future<File?>> _inFlightDownloads = {};
+  final LinkedHashMap<String, Uint8List> _decryptedImages = LinkedHashMap();
+  final Map<String, Future<Uint8List?>> _inFlightDownloads = {};
 
   static const int _maxAvatarEntries = 64;
+  static const int _maxImageEntries = 16;
+  static const int _maxImageCacheBytes = 12 * 1024 * 1024;
+  int _decryptedImageBytes = 0;
 
   static String _stableHash(String input) {
     var h1 = 0x811c9dc5;
@@ -37,17 +36,20 @@ class MediaCacheService {
         '_${input.length}';
   }
 
-  /// Returns a cached [MemoryImage] for a base64-encoded avatar string so
-  /// widget rebuilds do not repeatedly run [base64Decode].
+  /// Returns a cached [MemoryImage] for a base64-encoded avatar so widget
+  /// rebuilds do not repeatedly decode it.
   ImageProvider? avatarProvider(String? base64Photo) {
     if (base64Photo == null || base64Photo.isEmpty) return null;
     final key = _stableHash(base64Photo);
-    final existing = _avatarMemoryCache[key];
-    if (existing != null) return existing;
+    final existing = _avatarMemoryCache.remove(key);
+    if (existing != null) {
+      _avatarMemoryCache[key] = existing;
+      return existing;
+    }
     try {
       final bytes = base64Decode(base64Photo);
       if (bytes.isEmpty) return null;
-      if (_avatarMemoryCache.length >= _maxAvatarEntries) {
+      while (_avatarMemoryCache.length >= _maxAvatarEntries) {
         _avatarMemoryCache.remove(_avatarMemoryCache.keys.first);
       }
       final provider = MemoryImage(Uint8List.fromList(bytes));
@@ -58,148 +60,63 @@ class MediaCacheService {
     }
   }
 
-  Future<Directory> _cacheDir() async {
-    if (cacheDirOverride != null) {
-      await cacheDirOverride!.create(recursive: true);
-      return cacheDirOverride!;
-    }
-    try {
-      final support = await getApplicationSupportDirectory();
-      final dir = Directory('${support.path}/media_cache');
-      await dir.create(recursive: true);
-      return dir;
-    } catch (_) {
-      final fallback = Directory('${Directory.systemTemp.path}/media_cache');
-      await fallback.create(recursive: true);
-      return fallback;
-    }
-  }
-
-  static const int _maxDiskCacheBytes = 50 * 1024 * 1024;
-
-  /// Pre-seeds the local disk cache with [sourceFile] under [url] so the
-  /// sender never re-downloads their own uploaded photo from Firebase Storage.
-  Future<void> seedCachedImage(String url, File sourceFile) async {
-    final trimmed = url.trim();
-    if (trimmed.isEmpty || !sourceFile.existsSync()) return;
-    try {
-      final dir = await _cacheDir();
-      final hash = _stableHash(trimmed);
-      final target = File('${dir.path}/img_$hash.jpg');
-      if (sourceFile.path != target.path) {
-        await sourceFile.copy(target.path);
-      }
-      _resolvedFileCache[trimmed] = target;
-      await pruneDiskCacheIfNeeded();
-    } catch (_) {}
-  }
-
-  /// Returns a cached `.m4a` file for a decrypted voice note, writing it once.
-  Future<File?> getOrCacheVoiceNote(
+  /// Loads an encrypted photo, decrypts it through [loader], and caches only
+  /// the decrypted bytes in a size-bounded LRU memory cache.
+  Future<Uint8List?> getDecryptedImage(
     String cacheKey,
-    List<int> audioBytes,
-  ) async {
-    if (audioBytes.isEmpty) return null;
-    final key = 'voice_${_stableHash(cacheKey)}';
-    final mem = _resolvedFileCache[key];
-    if (mem != null && mem.existsSync() && mem.lengthSync() > 0) {
-      return mem;
+    Future<Uint8List?> Function() loader,
+  ) {
+    final cached = _decryptedImages.remove(cacheKey);
+    if (cached != null) {
+      _decryptedImages[cacheKey] = cached;
+      return Future.value(cached);
     }
-    try {
-      final dir = await _cacheDir();
-      final file = File('${dir.path}/$key.m4a');
-      if (!await file.exists() || await file.length() == 0) {
-        final tmp = File('${file.path}.tmp');
-        await tmp.writeAsBytes(audioBytes, flush: true);
-        await tmp.rename(file.path);
-        await pruneDiskCacheIfNeeded();
-      }
-      _resolvedFileCache[key] = file;
-      return file;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  /// Prunes oldest cached media files when total cache exceeds 50 MB.
-  Future<void> pruneDiskCacheIfNeeded() async {
-    try {
-      final dir = await _cacheDir();
-      final entries = dir
-          .listSync()
-          .whereType<File>()
-          .where((f) => !f.path.endsWith('.tmp'))
-          .toList();
-      var total = 0;
-      final stats = <({File file, int size, DateTime modified})>[];
-      for (final file in entries) {
-        final stat = file.statSync();
-        total += stat.size;
-        stats.add((file: file, size: stat.size, modified: stat.modified));
-      }
-      if (total <= _maxDiskCacheBytes) return;
-      stats.sort((a, b) => a.modified.compareTo(b.modified));
-      for (final item in stats) {
-        if (total <= _maxDiskCacheBytes) break;
-        try {
-          item.file.deleteSync();
-          total -= item.size;
-        } catch (_) {}
-      }
-    } catch (_) {}
-  }
-
-  /// Returns the local cached [File] for [url], downloading it once if needed.
-  Future<File?> getOrDownloadImage(String url) {
-    final trimmed = url.trim();
-    if (trimmed.isEmpty) return Future.value(null);
-    final memFile = _resolvedFileCache[trimmed];
-    if (memFile != null && memFile.existsSync() && memFile.lengthSync() > 0) {
-      return Future.value(memFile);
-    }
-    return _inFlightDownloads.putIfAbsent(trimmed, () async {
+    return _inFlightDownloads.putIfAbsent(cacheKey, () async {
       try {
-        final dir = await _cacheDir();
-        final hash = _stableHash(trimmed);
-        final file = File('${dir.path}/img_$hash.jpg');
-        if (await file.exists() && await file.length() > 0) {
-          _resolvedFileCache[trimmed] = file;
-          return file;
+        final bytes = await loader();
+        if (bytes == null || bytes.isEmpty) return null;
+        if (bytes.length <= _maxImageCacheBytes) {
+          while (_decryptedImages.isNotEmpty &&
+              (_decryptedImages.length >= _maxImageEntries ||
+                  _decryptedImageBytes + bytes.length > _maxImageCacheBytes)) {
+            final oldestKey = _decryptedImages.keys.first;
+            _decryptedImageBytes -= _decryptedImages.remove(oldestKey)!.length;
+          }
+          final copy = Uint8List.fromList(bytes);
+          _decryptedImages[cacheKey] = copy;
+          _decryptedImageBytes += copy.length;
+          return copy;
         }
-        if (Platform.environment.containsKey('FLUTTER_TEST')) {
-          return null;
-        }
-        final uri = Uri.tryParse(trimmed);
-        if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {
-          return null;
-        }
-        final client = HttpClient();
-        try {
-          final request = await client.getUrl(uri);
-          final response = await request.close();
-          if (response.statusCode != HttpStatus.ok) return null;
-          final bytes = await consolidateHttpClientResponseBytes(response);
-          if (bytes.isEmpty) return null;
-          final tmp = File('${file.path}.tmp');
-          await tmp.writeAsBytes(bytes, flush: true);
-          await tmp.rename(file.path);
-          _resolvedFileCache[trimmed] = file;
-          return file;
-        } finally {
-          client.close();
-        }
-      } catch (_) {
-        return null;
+        return bytes;
       } finally {
-        _inFlightDownloads.remove(trimmed);
+        _inFlightDownloads.remove(cacheKey);
       }
     });
   }
+
+  /// Drops decrypted-photo memory for a room after it is unpaired.
+  void clearRoomImages(String roomId) {
+    final prefix = '$roomId:';
+    final keys = _decryptedImages.keys
+        .where((key) => key.startsWith(prefix))
+        .toList();
+    for (final key in keys) {
+      _decryptedImageBytes -= _decryptedImages.remove(key)!.length;
+    }
+  }
+
+  @visibleForTesting
+  int get cachedImageCount => _decryptedImages.length;
+
+  @visibleForTesting
+  int get cachedImageBytes => _decryptedImageBytes;
 }
 
-/// Displays a remote image backed by persistent local disk caching.
+/// Displays a room-encrypted photo. The plaintext exists only as bounded
+/// in-memory bytes; it is never cached as a file on disk.
 class CachedChatImage extends StatefulWidget {
   final String imageUrl;
+  final String roomId;
   final double? width;
   final double? height;
   final BoxFit fit;
@@ -207,6 +124,7 @@ class CachedChatImage extends StatefulWidget {
   const CachedChatImage({
     super.key,
     required this.imageUrl,
+    required this.roomId,
     this.width,
     this.height,
     this.fit = BoxFit.cover,
@@ -217,59 +135,61 @@ class CachedChatImage extends StatefulWidget {
 }
 
 class _CachedChatImageState extends State<CachedChatImage> {
-  Future<File?>? _fileFuture;
+  late Future<Uint8List?> _bytesFuture;
 
   @override
   void initState() {
     super.initState();
-    _fileFuture = MediaCacheService().getOrDownloadImage(widget.imageUrl);
+    _bytesFuture = _load();
   }
+
+  Future<Uint8List?> _load() => MediaCacheService().getDecryptedImage(
+    '${widget.roomId}:${widget.imageUrl}',
+    () => FirebaseService().downloadDecryptedImage(
+      widget.imageUrl,
+      roomId: widget.roomId,
+    ),
+  );
 
   @override
   void didUpdateWidget(covariant CachedChatImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.imageUrl != widget.imageUrl) {
-      _fileFuture = MediaCacheService().getOrDownloadImage(widget.imageUrl);
+    if (oldWidget.imageUrl != widget.imageUrl ||
+        oldWidget.roomId != widget.roomId) {
+      _bytesFuture = _load();
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<File?>(
-      future: _fileFuture,
+    return FutureBuilder<Uint8List?>(
+      future: _bytesFuture,
       builder: (context, snapshot) {
-        final file = snapshot.data;
-        if (file != null) {
-          return Image.file(
-            file,
+        final bytes = snapshot.data;
+        if (bytes != null && bytes.isNotEmpty) {
+          return Image.memory(
+            bytes,
             width: widget.width,
             height: widget.height,
             fit: widget.fit,
+            gaplessPlayback: true,
           );
         }
-        return Image.network(
-          widget.imageUrl,
-          width: widget.width,
-          height: widget.height,
-          fit: widget.fit,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Container(
-              width: widget.width,
-              height: widget.height,
-              color: Colors.grey[850],
-              child: const Center(child: CircularProgressIndicator()),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              width: widget.width,
-              height: widget.height,
-              color: Colors.grey[850],
-              alignment: Alignment.center,
-              child: const Icon(Icons.broken_image, color: Colors.white54),
-            );
-          },
+        final width = widget.width ?? 220.0;
+        final height = widget.height ?? 180.0;
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return SizedBox(
+            width: width,
+            height: height,
+            child: const Center(
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          );
+        }
+        return SizedBox(
+          width: width,
+          height: height,
+          child: const Center(child: Icon(Icons.broken_image_outlined)),
         );
       },
     );

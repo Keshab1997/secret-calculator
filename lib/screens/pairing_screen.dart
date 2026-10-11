@@ -23,7 +23,7 @@ class _PairingScreenState extends State<PairingScreen> {
   StreamSubscription<DatabaseEvent>? _membersSub;
   bool _isLoading = false;
   bool _hasNavigated = false;
-  String? _myCode;
+  String? _myInvite;
   String? _error;
 
   @override
@@ -45,14 +45,14 @@ class _PairingScreenState extends State<PairingScreen> {
       await _firebase.createRoom();
       if (!mounted) return;
       setState(() {
-        _myCode = _firebase.getShortCode();
+        _myInvite = _firebase.currentInviteCode;
         _isLoading = false;
       });
       _listenForPartnerJoin();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to create room';
+        _error = 'Could not create a secure invite. Check the connection and Firebase authentication setup.';
         _isLoading = false;
       });
     }
@@ -63,9 +63,9 @@ class _PairingScreenState extends State<PairingScreen> {
     _membersSub = _firebase.getRoomMembersStream().listen((event) {
       final raw = event.snapshot.value;
       if (raw is Map) {
-        final hasPartner = raw.keys.any(
-          (key) => key.toString() != _firebase.myPeerId,
-        );
+        final ownUid = _firebase.authUid;
+        final hasPartner =
+            ownUid != null && raw.keys.any((key) => key.toString() != ownUid);
         if (hasPartner) {
           _openChat();
         }
@@ -98,9 +98,9 @@ class _PairingScreenState extends State<PairingScreen> {
   }
 
   Future<void> _joinRoom() async {
-    final code = _codeController.text.trim().toUpperCase();
-    if (!FirebaseService.isValidRoomCode(code)) {
-      setState(() => _error = 'Please enter a valid 6-character code');
+    final invitation = _codeController.text.trim();
+    if (!FirebaseService.isValidInviteCode(invitation)) {
+      setState(() => _error = 'Enter the complete secure invite');
       return;
     }
 
@@ -110,20 +110,22 @@ class _PairingScreenState extends State<PairingScreen> {
     });
 
     try {
-      final success = await _firebase.joinRoom(code);
+      final success = await _firebase.joinRoom(invitation);
       if (!mounted) return;
       if (success) {
         _openChat();
       } else {
         setState(() {
-          _error = 'Room not found';
+          _error = 'Invite is invalid, expired, or already paired';
           _isLoading = false;
         });
       }
-    } catch (e) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
-        _error = 'Failed to join room';
+        _error = error is StateError
+            ? error.message
+            : 'Secure pairing failed. Check your connection and try again.';
         _isLoading = false;
       });
     }
@@ -182,12 +184,12 @@ class _PairingScreenState extends State<PairingScreen> {
     ],
   );
 
-  Future<void> _copyCode() async {
-    final code = _myCode;
-    if (code == null) return;
-    await Clipboard.setData(ClipboardData(text: code));
+  Future<void> _copyInvite() async {
+    final invite = _myInvite;
+    if (invite == null) return;
+    await Clipboard.setData(ClipboardData(text: invite));
     if (!mounted) return;
-    AppToast.show(context, 'Pairing code copied', kind: AppToastKind.success);
+    AppToast.show(context, 'Secure invite copied', kind: AppToastKind.success);
   }
 
   @override
@@ -213,58 +215,58 @@ class _PairingScreenState extends State<PairingScreen> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                // My code
+                // Secure invitation; the room ID is not sufficient to join.
                 _card(
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Your Pair Code',
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'Your Secure Invite',
                               style: Theme.of(context).textTheme.titleMedium,
                             ),
-                            const SizedBox(height: 4),
-                            if (_isLoading && _myCode == null)
-                              const Padding(
-                                padding: EdgeInsets.only(top: 4),
-                                child: SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.4,
-                                    color: chatGreen,
-                                  ),
-                                ),
-                              )
-                            else
-                              FittedBox(
-                                fit: BoxFit.scaleDown,
-                                child: Text(
-                                  _myCode ?? '······',
-                                  style: const TextStyle(
-                                    fontSize: 30,
-                                    fontWeight: FontWeight.bold,
-                                    letterSpacing: 6,
-                                    color: chatGreen,
-                                  ),
-                                ),
+                          ),
+                          IconButton(
+                            tooltip: 'Copy secure invite',
+                            icon: const Icon(Icons.copy, color: chatGreen),
+                            onPressed: _myInvite == null ? null : _copyInvite,
+                          ),
+                        ],
+                      ),
+                      if (_isLoading && _myInvite == null)
+                        const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(8),
+                            child: SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.4,
+                                color: chatGreen,
                               ),
-                          ],
+                            ),
+                          ),
+                        )
+                      else
+                        SelectableText(
+                          _myInvite ?? '······.••••••••',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w600,
+                            height: 1.5,
+                            color: chatGreen,
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy pairing code',
-                        icon: const Icon(Icons.copy, color: chatGreen),
-                        onPressed: _myCode == null ? null : _copyCode,
-                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Share this code — your partner enters it on their phone.',
+                  'Share the full invite through a trusted channel. The secret is case-sensitive; the room ID alone cannot join.',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 12.5,
@@ -311,14 +313,17 @@ class _PairingScreenState extends State<PairingScreen> {
                         icon: Icons.link,
                         title: 'Join Partner',
                         subtitle:
-                            "Enter your partner's code to link this phone",
+                            "Enter the full secure invite from your partner",
                       ),
                       const SizedBox(height: 14),
                       TextField(
                         controller: _codeController,
                         textAlign: TextAlign.center,
-                        maxLength: 6,
-                        textCapitalization: TextCapitalization.characters,
+                        keyboardType: TextInputType.visiblePassword,
+                        maxLength: 50,
+                        textCapitalization: TextCapitalization.none,
+                        autocorrect: false,
+                        enableSuggestions: false,
                         style: TextStyle(
                           fontSize: 22,
                           letterSpacing: 6,
@@ -326,7 +331,7 @@ class _PairingScreenState extends State<PairingScreen> {
                           color: MessagingPalette.of(context).ink,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'CODE',
+                          hintText: 'ROOMID.SECRET',
                           counterText: '',
                           contentPadding: const EdgeInsets.symmetric(
                             vertical: 14,

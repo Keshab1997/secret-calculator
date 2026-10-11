@@ -154,7 +154,6 @@ class _ChatScreenState extends State<ChatScreen>
   StreamSubscription<DatabaseEvent>? _statusSub;
   StreamSubscription<DatabaseEvent>? _callSub;
   Timer? _typingDebounce;
-  Timer? _expiryTimer;
   Timer? _recordingTimer;
 
   bool _showEmojiPicker = false;
@@ -196,6 +195,7 @@ class _ChatScreenState extends State<ChatScreen>
   /// known duration rather than a decoder position.
   double _voiceProgress = 0;
   Timer? _voiceProgressTimer;
+  Timer? _expiryDisplayTimer;
   bool _isShowingCall = false;
   bool _pickingExternalMedia = false;
 
@@ -236,17 +236,20 @@ class _ChatScreenState extends State<ChatScreen>
     _listenForMessages();
     _listenForPartnerStatus();
     _listenForIncomingCalls();
-    _expiryTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      _pruneExpiredMessages();
-    });
+    // Local display only; authoritative message and image deletion is handled
+    // by the scheduled server cleanup function.
+    _expiryDisplayTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _hideExpiredMessagesLocally(),
+    );
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _typingDebounce?.cancel();
-    _expiryTimer?.cancel();
     _voiceProgressTimer?.cancel();
+    _expiryDisplayTimer?.cancel();
     _recordingTimer?.cancel();
     _messagesSub?.cancel();
     _statusSub?.cancel();
@@ -314,23 +317,20 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  void _pruneExpiredMessages() {
+  void _hideExpiredMessagesLocally() {
     if (!mounted || _messages.isEmpty) return;
-    final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final expired = <ChatMessage>[];
-    for (final msg in _messages) {
-      if (msg.expiresAtMs != null && msg.expiresAtMs! <= nowMs) {
-        expired.add(msg);
-      }
-    }
-    if (expired.isEmpty) return;
-    for (final msg in expired) {
-      _firebase.deleteMessage(msg.id, imageUrl: msg.imageUrl);
-    }
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final visible = _messages
+        .where(
+          (message) =>
+              message.expiresAtMs == null || message.expiresAtMs! > now,
+        )
+        .toList();
+    if (visible.length == _messages.length) return;
     setState(() {
-      _messages.removeWhere(
-        (m) => m.expiresAtMs != null && m.expiresAtMs! <= nowMs,
-      );
+      _messages
+        ..clear()
+        ..addAll(visible);
     });
   }
 
@@ -393,14 +393,14 @@ class _ChatScreenState extends State<ChatScreen>
 
       for (final entry in entries) {
         final message = entry.value;
-        final expiresAt = message['expiresAt'] as int?;
-        if (expiresAt != null && expiresAt <= nowMs) {
-          _firebase.deleteMessage(
-            entry.key,
-            imageUrl: message['imageUrl'] as String?,
-          );
-          continue;
-        }
+        final messageTimestamp = message['timestamp'] as int?;
+        final expiresInSeconds = message['expiresInSeconds'] as int?;
+        final expiresAt =
+            message['expiresAt'] as int? ??
+            (messageTimestamp != null && expiresInSeconds != null
+                ? messageTimestamp + expiresInSeconds * 1000
+                : null);
+        if (expiresAt != null && expiresAt <= nowMs) continue;
 
         final senderId = message['senderId']?.toString() ?? '';
         final isMe = senderId == _firebase.myPeerId;
@@ -786,6 +786,7 @@ class _ChatScreenState extends State<ChatScreen>
     final ok = await _native.playEncryptedAudio(
       message.encryptedAudioData!,
       _encryption,
+      durationSeconds: message.audioDurationSeconds,
     );
     if (!ok) {
       _stopVoiceProgress();
@@ -859,10 +860,10 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _flushPending(_PendingSend pending) async {
     final sendingRoom = _firebase.getShortCode();
     try {
-      String? imageUrl;
+      ({String url, String path})? uploadedImage;
       if (pending.image != null) {
         if (mounted) setState(() => pending.progress = 0);
-        imageUrl = await _firebase.uploadImage(
+        uploadedImage = await _firebase.uploadImage(
           pending.image!,
           onProgress: (value) {
             if (!mounted) return;
@@ -880,7 +881,8 @@ class _ChatScreenState extends State<ChatScreen>
       final reply = pending.replyTarget;
       await _firebase.sendMessage(
         pending.text ?? '',
-        imageUrl: imageUrl,
+        imageUrl: uploadedImage?.url,
+        imagePath: uploadedImage?.path,
         audioBase64: pending.audioBase64,
         audioDurationSeconds: pending.audioDurationSeconds,
         replyToText:
@@ -1059,7 +1061,7 @@ class _ChatScreenState extends State<ChatScreen>
           value: 'room_info',
           icon: Icons.verified_user_outlined,
           label: 'Room: ${_firebase.getShortCode()}',
-          subtitle: 'Secret room pairing code',
+          subtitle: 'Internal room ID; not enough to join',
         ),
         const OptionSheetItem(
           value: 'theme',
@@ -1134,7 +1136,9 @@ class _ChatScreenState extends State<ChatScreen>
           ),
         );
         if (confirmed != true) return;
+        final leavingRoom = _firebase.getShortCode();
         await _firebase.leaveRoom();
+        MediaCacheService().clearRoomImages(leavingRoom);
         if (!mounted) return;
         Navigator.pop(context);
         break;
@@ -1461,7 +1465,7 @@ class _ChatScreenState extends State<ChatScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Room Pair Code:',
+              'Room ID (not an invite):',
               style: TextStyle(color: _sub, fontSize: 12),
             ),
             const SizedBox(height: 4),
@@ -1479,14 +1483,14 @@ class _ChatScreenState extends State<ChatScreen>
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.copy, size: 20),
-                  tooltip: 'Copy Code',
+                  tooltip: 'Copy room ID',
                   onPressed: code.isEmpty
                       ? null
                       : () {
                           Clipboard.setData(ClipboardData(text: code));
                           AppToast.show(
                             context,
-                            'Room code copied!',
+                            'Room ID copied',
                             kind: AppToastKind.success,
                             duration: const Duration(seconds: 1),
                           );
@@ -1495,6 +1499,11 @@ class _ChatScreenState extends State<ChatScreen>
               ],
             ),
             const SizedBox(height: 12),
+            const Text(
+              'Only the full secure invite from Pair Device can add a member.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 8),
             const Text(
               'Encryption: AES-256-GCM (Per-message random nonce)',
               style: TextStyle(fontSize: 13),
@@ -1540,7 +1549,9 @@ class _ChatScreenState extends State<ChatScreen>
       ),
     );
     if (confirmed == true) {
+      final room = _firebase.getShortCode();
       await _firebase.clearAllMessages();
+      MediaCacheService().clearRoomImages(room);
     }
   }
 
@@ -1561,7 +1572,11 @@ class _ChatScreenState extends State<ChatScreen>
             child: InteractiveViewer(
               minScale: 0.8,
               maxScale: 4.0,
-              child: CachedChatImage(imageUrl: imageUrl, fit: BoxFit.contain),
+              child: CachedChatImage(
+                imageUrl: imageUrl,
+                roomId: _firebase.getShortCode(),
+                fit: BoxFit.contain,
+              ),
             ),
           ),
         ),
@@ -2488,6 +2503,7 @@ class _ChatScreenState extends State<ChatScreen>
                           borderRadius: BorderRadius.circular(12),
                           child: CachedChatImage(
                             imageUrl: message.imageUrl!,
+                            roomId: _firebase.getShortCode(),
                             width: 220,
                             height: 220,
                           ),

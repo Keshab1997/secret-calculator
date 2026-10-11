@@ -24,7 +24,8 @@ Enter the secret code **`1997`** to unlock:
 1. Open the app - it looks like a regular calculator
 2. Type `1997` on the calculator
 3. The secret chat screen will appear!
-4. Chat, share images, make calls
+4. Use **Pair a device** and share the complete secure invite (`ROOMID.SECRET`) with the other device. The room ID by itself is not enough to join.
+5. Chat, share images, make calls
 
 ## Technical Details
 
@@ -64,7 +65,7 @@ flutter build ios
 
 ## Security Note
 
-This app is designed for private conversations. The secret code provides an additional layer of privacy, but always ensure you're using secure networks for sensitive communications.
+Chat rooms require an authenticated member and the full high-entropy secure invite. Message text and photos are encrypted on-device; passcodes and room keys are stored in platform secure storage. Existing pairings must be re-established after the secure-pairing cutover. See [`docs/security-cutover.md`](docs/security-cutover.md) for Firebase setup, migration, and scheduled-cleanup notes. The code/rules/functions in this repository have not been deployed to Firebase.
 
 ## License
 

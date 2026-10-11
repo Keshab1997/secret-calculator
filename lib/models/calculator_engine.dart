@@ -77,8 +77,7 @@ class CalculatorEngine {
       if (_secretBuffer.length > 8) {
         _secretBuffer = _secretBuffer.substring(_secretBuffer.length - 8);
       }
-      if (_secretBuffer.endsWith(_customCode) ||
-          _secretBuffer.endsWith(secretCode)) {
+      if (_secretBuffer.endsWith(_customCode)) {
         clear();
         return true;
       }

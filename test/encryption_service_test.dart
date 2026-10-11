@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:calculator/services/encryption_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -45,6 +47,24 @@ void main() {
         expect(service.decrypt(second), equals(message));
       },
     );
+
+    test('raw media encryption authenticates and round-trips bytes', () {
+      final room = EncryptionService.withPassphrase('separate-room-secret');
+      final plain = Uint8List.fromList(
+        List.generate(512, (index) => index % 256),
+      );
+      final encrypted = room.encryptBytes(plain);
+      expect(encrypted.length, plain.length + 28);
+      expect(room.decryptBytes(encrypted), plain);
+      encrypted[encrypted.length - 1] ^= 0x01;
+      expect(() => room.decryptBytes(encrypted), throwsFormatException);
+      expect(
+        () =>
+            EncryptionService.withPassphrase('wrong-secret')
+                .decryptBytes(room.encryptBytes(plain)),
+        throwsFormatException,
+      );
+    });
 
     test('throws FormatException on malformed or tampered ciphertext', () {
       expect(() => service.decrypt('not-encrypted'), throwsFormatException);

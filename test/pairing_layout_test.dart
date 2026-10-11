@@ -23,7 +23,7 @@ void main() {
 
     // Both ends of the screen must be on-screen at once: the heading at the
     // top and the JOIN button at the bottom.
-    for (final label in ['Your Pair Code', 'Join Partner', 'JOIN']) {
+    for (final label in ['Your Secure Invite', 'Join Partner', 'JOIN']) {
       final finder = find.text(label);
       expect(finder, findsOneWidget, reason: '$label is missing');
       final rect = tester.getRect(finder);

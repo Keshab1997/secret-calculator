@@ -20,7 +20,7 @@ void main() {
     tearDown(() => temporary.deleteSync(recursive: true));
 
     test(
-      'migrates the old single-room state without losing identity or passcode',
+      'legacy rooms require a secure re-pair while passcodes migrate safely',
       () async {
         state.writeAsStringSync(
           jsonEncode({
@@ -31,13 +31,15 @@ void main() {
           }),
         );
         await service.loadSavedState();
-        expect(service.pairedRooms.keys, ['AB23CD']);
+        expect(service.pairedRooms, isEmpty);
+        expect(service.needsSecureRePair, isTrue);
         expect(service.peerId, '1234567890abcdef');
         expect(service.customPasscode, '2580');
         expect(service.biometricEnabled, isTrue);
-        await service.selectRoom('AB23CD');
-        expect(service.getShortCode(), 'AB23CD');
-        expect(service.isPaired, isTrue);
+        await expectLater(service.selectRoom('AB23CD'), throwsArgumentError);
+        final saved = jsonDecode(state.readAsStringSync()) as Map;
+        expect(saved.containsKey('customPasscode'), isFalse);
+        expect(saved.containsKey('decoyPasscode'), isFalse);
       },
     );
 
@@ -70,7 +72,8 @@ void main() {
           }),
         );
         await service.loadSavedState();
-        expect(service.pairedRooms.keys, ['AB23CD']);
+        expect(service.pairedRooms, isEmpty);
+        expect(service.needsSecureRePair, isTrue);
         await expectLater(service.selectRoom('ZZ99ZZ'), throwsArgumentError);
       },
     );
@@ -91,8 +94,9 @@ void main() {
       );
     });
 
-    test('profile decoding uses the requested room key, excludes self and fails closed', () {
-      final cipher = EncryptionService.withPassphrase('AB23CD');
+    test('profile decoding uses the protected room key, excludes self and fails closed', () {
+      service.setRoomIdForTesting('AB23CD', secret: 'unit-test-room-secret');
+      final cipher = EncryptionService.withPassphrase('unit-test-room-secret');
       final encoded = cipher.encrypt(
         jsonEncode({'name': 'Partner', 'about': 'Hi'}),
       );

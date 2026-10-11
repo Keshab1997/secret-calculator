@@ -21,15 +21,14 @@ This document tracks the architecture and behavior of the stealth, privacy, medi
 
 ## 2. Firebase Bandwidth, Storage & Query Optimizations
 
-5. **Upload Pre-Seed Cache & Smart Compression:**
-   - Image attachments continue using compact resize/compression (`maxWidth: 1280`, `imageQuality: 75`) and immediately seed `MediaCacheService` with the local bytes upon upload (`seedCachedImage(downloadUrl, sourceFile)`), so the sender never re-downloads their own uploaded photo from Firebase Storage.
+5. **Client-Encrypted Photo Uploads:**
+   - Photo bytes are encrypted with the room key before upload, stored under a random object name as `application/octet-stream`, and decrypted only after download. Decrypted photos use a bounded memory-only cache; no decrypted photo is seeded to disk.
 
 6. **Firebase Storage Cleanup on Message Delete / Clear / Expiry:**
-   - Deleting a message, pruning an expired disappearing message, or clearing a conversation also deletes any associated Firebase Storage object (`FirebaseStorage.instance.refFromURL(imageUrl).delete()`) best-effort so orphaned encrypted photos do not accumulate in cloud storage.
+   - Explicit message deletion and clearing a conversation remove associated Storage objects best-effort. Expiry is handled by the server: a database trigger indexes expiring messages under `/expiring`, and a scheduled function removes expired messages and safe, room-confined image paths in batches. The client only hides expired messages locally; it does not perform expiry deletion.
 
-7. **Voice Note Disk Caching & Automatic Cache Pruning:**
-   - Decrypted voice notes (`NativeBridgeService.playEncryptedAudio`) are cached deterministically by payload hash in `MediaCacheService` instead of writing a new temporary `.m4a` file on every play.
-   - `MediaCacheService` enforces a bounded disk cache (pruning oldest cached media files when total size exceeds 50 MB).
+7. **Temporary Voice Playback:**
+   - `NativeBridgeService.playEncryptedAudio` decrypts the note to a temporary `.m4a` playback file, then removes it on stop or after the native player duration. Stale playback folders are removed on the next app launch. `MediaCacheService` retains only a bounded in-memory cache for decrypted photos and avatars.
 
 8. **Bounded Directory & Chat Queries:**
    - `FirebaseService` enables Realtime Database disk persistence (`10 MB`) and bounds message streams (`limitToLast(150)` in active chats, `limitToLast(1)` for background calculator message checks, and bounded recent messages in the directory) while caching decrypted profiles and messages in memory.
@@ -38,7 +37,7 @@ This document tracks the architecture and behavior of the stealth, privacy, medi
 
 9. **Gboard / Rich Keyboard Sticker & Image Input (`contentInsertionConfiguration`):**
    - The chat composer `TextField` registers `ContentInsertionConfiguration` for `image/png`, `image/gif`, `image/webp`, and `image/jpeg`.
-   - Selecting a sticker or rich image directly from Gboard writes the bytes to a temporary file, uploads it through the existing Storage pipeline, pre-seeds the local cache, and sends it into the current room.
+   - Selecting a sticker or rich image directly from Gboard writes the source bytes to a temporary file, encrypts them in the upload pipeline, and sends the encrypted photo into the current room. The source temp file is not used as a decrypted download cache.
 
 10. **Discreet Single-Slot SMS Notifications:**
     - Notifications fire only for newly arrived partner messages when the user is not actively reading the chat in the foreground.

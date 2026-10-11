@@ -3,16 +3,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'encryption_service.dart';
-import 'media_cache_service.dart';
 
 /// A photo upload that failed with a reason worth showing the person who
 /// sent it.
@@ -28,16 +30,31 @@ class MediaUploadException implements Exception {
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
   factory FirebaseService() => _instance;
-  FirebaseService._internal() : _peerId = generatePeerId();
+  FirebaseService._internal()
+    : _peerId = generatePeerId(),
+      _secureStorageOverride = null;
+
+  static final Map<String, Map<String, String>> _testSecureValues = {};
+
   @visibleForTesting
   FirebaseService.forTesting(File stateFile)
     : _peerId = generatePeerId(),
-      stateFileOverride = stateFile;
+      stateFileOverride = stateFile,
+      _secureStorageOverride = _testSecureValues.putIfAbsent(
+        stateFile.path,
+        () => <String, String>{},
+      );
 
   /// Unambiguous 6-character code alphabet (excludes 0, O, 1, I).
   static const String codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   static const int roomCodeLength = 6;
+  static const int roomSecretLengthBytes = 32;
   static const String defaultPasscode = '1997';
+  static const String functionRegion = 'asia-southeast1';
+  static const String _customPasscodeStorageKey = 'custom_passcode_v1';
+  static const String _decoyPasscodeStorageKey = 'decoy_passcode_v1';
+  static const FlutterSecureStorage _platformSecureStorage =
+      FlutterSecureStorage();
 
   /// Explicit Realtime Database URL (required because the database resides in
   /// `asia-southeast1` and `google-services.json` may omit `firebase_url`).
@@ -47,8 +64,12 @@ class FirebaseService {
   static final Random _random = Random.secure();
   static final RegExp _validCodePattern = RegExp(r'^[A-Z0-9]{6}$');
   static final RegExp _validPasscodePattern = RegExp(r'^[0-9]{4,8}$');
+  static final RegExp _validRoomSecretPattern = RegExp(r'^[A-Za-z0-9_-]{43}$');
 
   final Map<String, String> _pairedRooms = {};
+  final Map<String, String> _roomSecrets = {};
+  final Map<String, String>? _secureStorageOverride;
+  bool _needsRePair = false;
   Map<String, String> _profile = {
     'name': 'Calculator user',
     'about': 'Available',
@@ -96,6 +117,20 @@ class FirebaseService {
 
   /// Whether this device has an active paired chat room.
   bool get isPaired => _isPaired && _roomId != null;
+
+  /// True when rooms created before the secure-invite upgrade need pairing again.
+  bool get needsSecureRePair => _needsRePair;
+
+  /// The out-of-band invite currently shown to the room creator.
+  String? get currentInviteCode {
+    final room = _roomId;
+    final secret = room == null ? null : _roomSecrets[room];
+    return room == null || secret == null ? null : '$room.$secret';
+  }
+
+  /// Current Firebase Auth identity, or null until anonymous sign-in succeeds.
+  String? get authUid =>
+      Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser?.uid;
 
   /// Current custom secret calculator passcode (4–8 digits).
   String get customPasscode => _customPasscode;
@@ -150,6 +185,11 @@ class FirebaseService {
     return db;
   }
 
+  FirebaseFunctions get _functions => FirebaseFunctions.instanceFor(
+    app: Firebase.app(),
+    region: functionRegion,
+  );
+
   /// Generates a random 6-character room code from [codeAlphabet].
   static String generateRoomCode() {
     return List.generate(
@@ -157,6 +197,35 @@ class FirebaseService {
       (_) => codeAlphabet[_random.nextInt(codeAlphabet.length)],
     ).join();
   }
+
+  /// Generates an independent 256-bit secret for encryption and joining.
+  static String generateRoomSecret() => base64UrlEncode(
+    List<int>.generate(roomSecretLengthBytes, (_) => _random.nextInt(256)),
+  ).replaceAll('=', '');
+
+  /// Parses the out-of-band `ROOMID.SECRET` invite, preserving secret case.
+  static ({String roomId, String secret})? parseInviteCode(String invite) {
+    final trimmed = invite.trim();
+    final separator = trimmed.indexOf('.');
+    if (separator < 0 || separator != trimmed.lastIndexOf('.')) return null;
+    final roomId = trimmed.substring(0, separator).trim().toUpperCase();
+    final secret = trimmed.substring(separator + 1);
+    if (!_validCodePattern.hasMatch(roomId) ||
+        !_validRoomSecretPattern.hasMatch(secret)) {
+      return null;
+    }
+    try {
+      if (base64Url.decode('$secret=').length != roomSecretLengthBytes) {
+        return null;
+      }
+    } on FormatException {
+      return null;
+    }
+    return (roomId: roomId, secret: secret);
+  }
+
+  static bool isValidInviteCode(String invite) =>
+      parseInviteCode(invite) != null;
 
   /// Generates a random 16-character peer identifier.
   static String generatePeerId() {
@@ -180,11 +249,57 @@ class FirebaseService {
 
   Future<void> initialize() async {
     await Firebase.initializeApp();
+    await ensureAuthenticated();
     await loadSavedState();
+  }
+
+  /// Creates a persistent anonymous Firebase identity before any paired data is
+  /// read or written. Anonymous sign-in must be enabled in Firebase Console.
+  Future<void> ensureAuthenticated() async {
+    if (Firebase.apps.isEmpty) return;
+    if (FirebaseAuth.instance.currentUser != null) return;
+    await FirebaseAuth.instance.signInAnonymously();
   }
 
   @visibleForTesting
   File? stateFileOverride;
+
+  Future<String?> _readProtectedValue(String key) async {
+    final override = _secureStorageOverride;
+    if (override != null) return override[key];
+    return _platformSecureStorage.read(key: key);
+  }
+
+  Future<void> _writeProtectedValue(String key, String value) async {
+    final override = _secureStorageOverride;
+    if (override != null) {
+      override[key] = value;
+      return;
+    }
+    await _platformSecureStorage.write(key: key, value: value);
+  }
+
+  Future<void> _deleteProtectedValue(String key) async {
+    final override = _secureStorageOverride;
+    if (override != null) {
+      override.remove(key);
+      return;
+    }
+    await _platformSecureStorage.delete(key: key);
+  }
+
+  static String _roomSecretStorageKey(String room) => 'room_key_v1_$room';
+
+  String _requireAuthenticatedUid() {
+    final uid = authUid;
+    if (uid == null || uid.isEmpty) {
+      throw StateError(
+        'Secure pairing requires Firebase Anonymous Authentication. '
+        'Enable it in Firebase Console, then restart the app.',
+      );
+    }
+    return uid;
+  }
 
   Future<File> _stateFile() async {
     if (stateFileOverride != null) return stateFileOverride!;
@@ -215,99 +330,155 @@ class FirebaseService {
     return File('${Directory.systemTemp.path}/secret_calc_state.json');
   }
 
-  /// Loads persisted `peerId`, `pairedRoomId`, `customPasscode`, and `biometricEnabled`.
+  /// Loads non-secret preferences from JSON and passcodes/room keys from
+  /// platform secure storage. Legacy rooms without an out-of-band key require
+  /// a fresh secure invite rather than silently reusing the public room ID.
   Future<void> loadSavedState() async {
     try {
       final file = await _stateFile();
       if (!file.existsSync()) {
+        final protectedPasscode = await _readProtectedValue(
+          _customPasscodeStorageKey,
+        );
+        if (protectedPasscode != null && isValidPasscode(protectedPasscode)) {
+          _customPasscode = protectedPasscode.trim();
+        } else {
+          await _writeProtectedValue(
+            _customPasscodeStorageKey,
+            _customPasscode,
+          );
+        }
+        final protectedDecoy = await _readProtectedValue(
+          _decoyPasscodeStorageKey,
+        );
+        if (protectedDecoy != null &&
+            isValidPasscode(protectedDecoy) &&
+            protectedDecoy.trim() != _customPasscode) {
+          _decoyPasscode = protectedDecoy.trim();
+        }
         await _saveState();
         return;
       }
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is Map) {
-        final savedPeer = decoded['peerId'];
-        if (savedPeer is String && savedPeer.length == 16) {
-          _peerId = savedPeer;
-        }
-        final savedPasscode = decoded['customPasscode'];
-        if (savedPasscode is String && isValidPasscode(savedPasscode)) {
-          _customPasscode = savedPasscode.trim();
-        }
-        final savedDecoy = decoded['decoyPasscode'];
-        if (savedDecoy is String &&
-            isValidPasscode(savedDecoy) &&
-            savedDecoy.trim() != _customPasscode &&
-            savedDecoy.trim() != defaultPasscode) {
-          _decoyPasscode = savedDecoy.trim();
-        }
-        final savedBio = decoded['biometricEnabled'];
-        if (savedBio is bool) {
-          _biometricEnabled = savedBio;
-        }
-        final savedDisappearing = decoded['disappearingSeconds'];
-        if (savedDisappearing is int) {
-          _disappearingSeconds = savedDisappearing;
-        }
-        final savedDark = decoded['darkMode'];
-        switch (savedDark) {
-          case 'light':
-            _themeMode = ThemeMode.light;
-          case 'dark':
-            _themeMode = ThemeMode.dark;
-          default:
-            _themeMode = ThemeMode.system;
-        }
-        themeModeNotifier.value = _themeMode;
-        final savedAlert = decoded['callAlert'];
-        if (savedAlert == 'sound' ||
-            savedAlert == 'vibrate' ||
-            savedAlert == 'silent') {
-          _callAlert = savedAlert as String;
-        }
-        callAlertNotifier.value = _callAlert;
-        final savedSeenRelease = decoded['lastSeenRelease'];
-        if (savedSeenRelease is String && savedSeenRelease.isNotEmpty) {
-          _lastSeenRelease = savedSeenRelease;
-        }
-        final rooms = decoded['pairedRooms'];
-        if (rooms is Map) {
-          for (final entry in rooms.entries) {
-            if (isValidRoomCode(entry.key.toString())) {
-              _pairedRooms[entry.key.toString().trim().toUpperCase()] = entry
-                  .value
-                  .toString();
-            }
-          }
-        }
-        final profile = decoded['profile'];
-        if (profile is Map) {
-          _profile = profile.map(
-            (key, value) => MapEntry(key.toString(), value.toString()),
-          );
-        }
-        final savedRoom = decoded['roomId'];
-        if (savedRoom is String && isValidRoomCode(savedRoom)) {
-          _pairedRooms.putIfAbsent(
-            savedRoom.trim().toUpperCase(),
-            () => 'Paired contact',
-          );
-        }
-        if (savedRoom is String &&
-            isValidRoomCode(savedRoom) &&
-            Firebase.apps.isNotEmpty) {
-          final normalized = savedRoom.trim().toUpperCase();
-          _roomId = normalized;
-          _isPaired = true;
-          _encryption.setRoomKey(normalized);
-          _chatRef = _db
-              .ref()
-              .child('rooms')
-              .child(normalized)
-              .child('messages');
+      if (decoded is! Map) return;
+
+      final savedPeer = decoded['peerId'];
+      if (savedPeer is String && savedPeer.length == 16) {
+        _peerId = savedPeer;
+      }
+
+      final savedPasscode = decoded['customPasscode'];
+      final protectedPasscode = await _readProtectedValue(
+        _customPasscodeStorageKey,
+      );
+      if (protectedPasscode != null && isValidPasscode(protectedPasscode)) {
+        _customPasscode = protectedPasscode.trim();
+      } else if (savedPasscode is String && isValidPasscode(savedPasscode)) {
+        _customPasscode = savedPasscode.trim();
+        await _writeProtectedValue(_customPasscodeStorageKey, _customPasscode);
+      } else {
+        await _writeProtectedValue(_customPasscodeStorageKey, _customPasscode);
+      }
+
+      final savedDecoy = decoded['decoyPasscode'];
+      final protectedDecoy = await _readProtectedValue(
+        _decoyPasscodeStorageKey,
+      );
+      final decoy = protectedDecoy ?? savedDecoy;
+      if (decoy is String &&
+          isValidPasscode(decoy) &&
+          decoy.trim() != _customPasscode) {
+        _decoyPasscode = decoy.trim();
+        if (protectedDecoy == null) {
+          await _writeProtectedValue(_decoyPasscodeStorageKey, _decoyPasscode!);
         }
       }
+
+      final savedBio = decoded['biometricEnabled'];
+      if (savedBio is bool) _biometricEnabled = savedBio;
+      final savedDisappearing = decoded['disappearingSeconds'];
+      if (savedDisappearing is int &&
+          const {30, 300, 3600}.contains(savedDisappearing)) {
+        _disappearingSeconds = savedDisappearing;
+      }
+      switch (decoded['darkMode']) {
+        case 'light':
+          _themeMode = ThemeMode.light;
+        case 'dark':
+          _themeMode = ThemeMode.dark;
+        default:
+          _themeMode = ThemeMode.system;
+      }
+      themeModeNotifier.value = _themeMode;
+      final savedAlert = decoded['callAlert'];
+      if (savedAlert == 'sound' ||
+          savedAlert == 'vibrate' ||
+          savedAlert == 'silent') {
+        _callAlert = savedAlert as String;
+      }
+      callAlertNotifier.value = _callAlert;
+      final savedSeenRelease = decoded['lastSeenRelease'];
+      if (savedSeenRelease is String && savedSeenRelease.isNotEmpty) {
+        _lastSeenRelease = savedSeenRelease;
+      }
+      _needsRePair = decoded['needsRePair'] == true;
+
+      final rooms = decoded['pairedRooms'];
+      if (rooms is Map) {
+        for (final entry in rooms.entries) {
+          if (isValidRoomCode(entry.key.toString())) {
+            _pairedRooms[entry.key.toString().trim().toUpperCase()] = entry
+                .value
+                .toString();
+          }
+        }
+      }
+      final profile = decoded['profile'];
+      if (profile is Map) {
+        _profile = profile.map(
+          (key, value) => MapEntry(key.toString(), value.toString()),
+        );
+      }
+      final savedRoom = decoded['roomId'];
+      if (savedRoom is String && isValidRoomCode(savedRoom)) {
+        _pairedRooms.putIfAbsent(
+          savedRoom.trim().toUpperCase(),
+          () => 'Paired contact',
+        );
+      }
+
+      for (final room in _pairedRooms.keys.toList()) {
+        final secret = await _readProtectedValue(_roomSecretStorageKey(room));
+        if (secret != null && _validRoomSecretPattern.hasMatch(secret)) {
+          _roomSecrets[room] = secret;
+        } else {
+          _pairedRooms.remove(room);
+          _needsRePair = true;
+        }
+      }
+
+      if (savedRoom is String && isValidRoomCode(savedRoom)) {
+        final normalized = savedRoom.trim().toUpperCase();
+        final secret = _roomSecrets[normalized];
+        if (secret != null && (Firebase.apps.isEmpty || authUid != null)) {
+          _roomId = normalized;
+          _isPaired = true;
+          _encryption.setRoomKey(secret);
+          _chatRef = Firebase.apps.isEmpty
+              ? null
+              : _db.ref('rooms/$normalized/messages');
+        } else {
+          _roomId = null;
+          _chatRef = null;
+          _isPaired = false;
+          _needsRePair = true;
+        }
+      }
+
+      // Rewrite migrated state without secrets in the JSON file.
+      await _saveState(strict: true);
     } catch (_) {
-      // Ignore corrupt or inaccessible local state in restricted/test environments.
+      // Keep startup usable if local state or the platform secure store is damaged.
     }
   }
 
@@ -320,8 +491,7 @@ class FirebaseService {
           'profile': _profile,
           'peerId': _peerId,
           'roomId': _isPaired ? _roomId : null,
-          'customPasscode': _customPasscode,
-          'decoyPasscode': _decoyPasscode,
+          'needsRePair': _needsRePair,
           'biometricEnabled': _biometricEnabled,
           'disappearingSeconds': _disappearingSeconds,
           'darkMode': _themeMode.name,
@@ -355,9 +525,11 @@ class FirebaseService {
   Future<bool> setCustomPasscode(String code) async {
     final trimmed = code.trim();
     if (!isValidPasscode(trimmed)) return false;
+    await _writeProtectedValue(_customPasscodeStorageKey, trimmed);
     _customPasscode = trimmed;
     if (_decoyPasscode == trimmed) {
       _decoyPasscode = null;
+      await _deleteProtectedValue(_decoyPasscodeStorageKey);
     }
     await _saveState();
     return true;
@@ -368,14 +540,14 @@ class FirebaseService {
     final trimmed = code?.trim() ?? '';
     if (trimmed.isEmpty) {
       _decoyPasscode = null;
+      await _deleteProtectedValue(_decoyPasscodeStorageKey);
       await _saveState();
       return true;
     }
-    if (!isValidPasscode(trimmed) ||
-        trimmed == _customPasscode ||
-        trimmed == defaultPasscode) {
+    if (!isValidPasscode(trimmed) || trimmed == _customPasscode) {
       return false;
     }
+    await _writeProtectedValue(_decoyPasscodeStorageKey, trimmed);
     _decoyPasscode = trimmed;
     await _saveState();
     return true;
@@ -387,17 +559,29 @@ class FirebaseService {
     await _saveState();
   }
 
+  /// Hides the one-time legacy-room re-pair migration notice.
+  Future<void> acknowledgeSecureRePairNotice() async {
+    _needsRePair = false;
+    await _saveState();
+  }
+
   /// Updates and persists the disappearing-message timer (null = off).
   Future<void> setDisappearingSeconds(int? seconds) async {
+    if (seconds != null && !const {30, 300, 3600}.contains(seconds)) {
+      throw ArgumentError.value(seconds, 'seconds', 'Unsupported expiry');
+    }
     _disappearingSeconds = seconds;
     await _saveState();
   }
 
   /// Marks the currently created room as paired and persists it.
   Future<void> markRoomPaired() async {
-    if (_roomId == null) return;
+    final room = _roomId;
+    if (room == null || !_roomSecrets.containsKey(room)) {
+      throw StateError('This room has no secure invite key.');
+    }
     _isPaired = true;
-    _pairedRooms.putIfAbsent(_roomId!, () => 'Paired contact');
+    _pairedRooms.putIfAbsent(room, () => 'Paired contact');
     await _saveState(strict: true);
     try {
       await _publishProfile();
@@ -407,23 +591,31 @@ class FirebaseService {
     await registerFcmToken();
   }
 
-  /// Unpairs the current room so the user can pair with a new code.
+  /// Unpairs this device and removes its authenticated room membership.
   Future<void> leaveRoom() async {
-    await updateOnlineStatus(false);
-    if (_roomId != null && Firebase.apps.isNotEmpty) {
+    final room = _roomId;
+    final uid = authUid;
+    try {
+      await updateOnlineStatus(false);
+    } catch (_) {}
+    if (room != null && Firebase.apps.isNotEmpty && uid != null) {
       try {
-        await _db
-            .ref()
-            .child('rooms')
-            .child(_roomId!)
-            .child('tokens')
-            .child(_peerId)
-            .remove();
+        final roomRef = _db.ref('rooms/$room');
+        await roomRef.child('tokens/$_peerId').remove();
+        await roomRef.child('status/$_peerId').remove();
+        await roomRef.child('profiles/$_peerId').remove();
+        await roomRef.child('members/$uid').remove();
       } catch (_) {
-        // Best effort — stale tokens are also dropped by the Cloud Function.
+        // Local unpair still completes; a stale membership can be removed later.
       }
     }
-    _pairedRooms.remove(_roomId);
+    if (room != null) {
+      _pairedRooms.remove(room);
+      _roomSecrets.remove(room);
+      try {
+        await _deleteProtectedValue(_roomSecretStorageKey(room));
+      } catch (_) {}
+    }
     _roomId = null;
     _chatRef = null;
     _isPaired = false;
@@ -440,7 +632,9 @@ class FirebaseService {
   /// Failures are swallowed: local notifications still cover the case where
   /// the app is open or backgrounded.
   Future<void> registerFcmToken() async {
-    if ((_roomId == null && _pairedRooms.isEmpty) || Firebase.apps.isEmpty) {
+    if ((_roomId == null && _pairedRooms.isEmpty) ||
+        Firebase.apps.isEmpty ||
+        authUid == null) {
       return;
     }
     try {
@@ -472,52 +666,78 @@ class FirebaseService {
     }
   }
 
-  // Create a room and return the 6-character room code.
+  /// Creates a room through a callable so the database stores only a hash of
+  /// the independent invite secret, never the secret itself.
   Future<String> createRoom() async {
-    final code = generateRoomCode();
-    final roomRef = _db.ref().child('rooms').child(code);
-
-    await roomRef.set({
-      'createdAt': ServerValue.timestamp,
-      'createdBy': _peerId,
-      'members': {
-        _peerId: {'joinedAt': ServerValue.timestamp},
-      },
-    });
-
-    _roomId = code;
-    _isPaired = false;
-    _encryption.setRoomKey(code);
-    _chatRef = roomRef.child('messages');
-    return code;
+    _requireAuthenticatedUid();
+    for (var attempt = 0; attempt < 8; attempt++) {
+      final code = generateRoomCode();
+      final secret = generateRoomSecret();
+      await _writeProtectedValue(_roomSecretStorageKey(code), secret);
+      try {
+        await _functions.httpsCallable('createRoomSecure').call({
+          'roomId': code,
+          'peerId': _peerId,
+          'inviteSecret': secret,
+        });
+        _roomSecrets[code] = secret;
+        _roomId = code;
+        _isPaired = false;
+        _encryption.setRoomKey(secret);
+        _chatRef = _db.ref('rooms/$code/messages');
+        return code;
+      } on FirebaseFunctionsException catch (error) {
+        await _deleteProtectedValue(_roomSecretStorageKey(code));
+        if (error.code == 'already-exists') continue;
+        rethrow;
+      } catch (_) {
+        await _deleteProtectedValue(_roomSecretStorageKey(code));
+        rethrow;
+      }
+    }
+    throw StateError('Could not reserve a unique room code. Please retry.');
   }
 
-  // Join an existing room with its 6-character code.
-  Future<bool> joinRoom(String roomCode) async {
-    final normalized = roomCode.trim().toUpperCase();
-    if (!isValidRoomCode(normalized)) {
-      return false;
+  /// Joins with the full `ROOMID.SECRET` invite. The callable validates the
+  /// secret before adding this authenticated device as the second member.
+  Future<bool> joinRoom(String invitation) async {
+    final parsed = parseInviteCode(invitation);
+    if (parsed == null) return false;
+    _requireAuthenticatedUid();
+
+    await _writeProtectedValue(
+      _roomSecretStorageKey(parsed.roomId),
+      parsed.secret,
+    );
+    try {
+      await _functions.httpsCallable('joinRoomSecure').call({
+        'roomId': parsed.roomId,
+        'peerId': _peerId,
+        'inviteSecret': parsed.secret,
+      });
+    } on FirebaseFunctionsException catch (error) {
+      await _deleteProtectedValue(_roomSecretStorageKey(parsed.roomId));
+      if (const {
+        'not-found',
+        'permission-denied',
+        'resource-exhausted',
+        'invalid-argument',
+      }.contains(error.code)) {
+        return false;
+      }
+      rethrow;
+    } catch (_) {
+      await _deleteProtectedValue(_roomSecretStorageKey(parsed.roomId));
+      rethrow;
     }
 
-    final roomRef = _db.ref().child('rooms').child(normalized);
-    final snapshot = await roomRef.get();
-
-    if (!snapshot.exists) {
-      _roomId = null;
-      _chatRef = null;
-      _isPaired = false;
-      return false;
-    }
-
-    _roomId = normalized;
+    final room = parsed.roomId;
+    _roomSecrets[room] = parsed.secret;
+    _roomId = room;
     _isPaired = true;
-    _encryption.setRoomKey(normalized);
-    _chatRef = roomRef.child('messages');
-
-    await roomRef.child('members').child(_peerId).set({
-      'joinedAt': ServerValue.timestamp,
-    });
-    _pairedRooms.putIfAbsent(normalized, () => 'Paired contact');
+    _encryption.setRoomKey(parsed.secret);
+    _chatRef = _db.ref('rooms/$room/messages');
+    _pairedRooms.putIfAbsent(room, () => 'Paired contact');
     await _saveState(strict: true);
     try {
       await _publishProfile();
@@ -525,7 +745,6 @@ class FirebaseService {
       /* Pairing remains valid if profile sync fails. */
     }
     await registerFcmToken();
-
     return true;
   }
 
@@ -534,10 +753,14 @@ class FirebaseService {
     if (!_pairedRooms.containsKey(code)) {
       throw ArgumentError('Unknown paired room');
     }
+    final secret = _roomSecrets[code];
+    if (secret == null) {
+      throw StateError('This conversation needs a fresh secure invite.');
+    }
     unawaited(updateOnlineStatus(false).catchError((_) {}));
     _roomId = code;
     _isPaired = true;
-    _encryption.setRoomKey(code);
+    _encryption.setRoomKey(secret);
     _chatRef = Firebase.apps.isEmpty ? null : _db.ref('rooms/$code/messages');
     await _saveState();
   }
@@ -558,11 +781,20 @@ class FirebaseService {
   Future<void> _publishProfile() async {
     if (Firebase.apps.isEmpty) return;
     for (final room in _pairedRooms.keys.toList()) {
-      final cipher = EncryptionService.withPassphrase(room);
+      final secret = _roomSecrets[room];
+      if (secret == null) continue;
+      final cipher = EncryptionService.withPassphrase(secret);
       await _db
           .ref('rooms/$room/profiles/$_peerId')
           .set(cipher.encrypt(jsonEncode(_profile)));
     }
+  }
+
+  /// Decrypts a list preview with that room's locally protected secret.
+  String decryptTextForRoom(String room, String ciphertext) {
+    final secret = _roomSecrets[room];
+    if (secret == null) throw const FormatException('Missing room key.');
+    return EncryptionService.withPassphrase(secret).decrypt(ciphertext);
   }
 
   Map<String, String> partnerProfile(String room, Object? rawProfiles) {
@@ -576,8 +808,10 @@ class FirebaseService {
         return cached.profile;
       }
       try {
+        final secret = _roomSecrets[room];
+        if (secret == null) return const {};
         final value = jsonDecode(
-          EncryptionService.withPassphrase(room).decrypt(cipherText),
+          EncryptionService.withPassphrase(secret).decrypt(cipherText),
         );
         if (value is Map) {
           final parsed = Map<String, String>.unmodifiable(
@@ -657,6 +891,7 @@ class FirebaseService {
   Future<void> sendMessage(
     String text, {
     String? imageUrl,
+    String? imagePath,
     String? audioBase64,
     int? audioDurationSeconds,
     String? replyToText,
@@ -670,6 +905,18 @@ class FirebaseService {
     }
     final chatRef = _ensureChatRef();
     if (chatRef == null) return;
+    if (expiresInSeconds != null &&
+        !const {30, 300, 3600}.contains(expiresInSeconds)) {
+      throw ArgumentError.value(
+        expiresInSeconds,
+        'expiresInSeconds',
+        'Unsupported expiry',
+      );
+    }
+    if (imagePath != null &&
+        !imagePath.startsWith('images/${_roomId ?? ''}/')) {
+      throw ArgumentError.value(imagePath, 'imagePath', 'Wrong room object');
+    }
 
     final encryptedText = text.isNotEmpty ? _encryption.encrypt(text) : null;
     final encryptedAudio = (audioBase64 != null && audioBase64.isNotEmpty)
@@ -678,15 +925,10 @@ class FirebaseService {
     final encryptedReply = (replyToText != null && replyToText.isNotEmpty)
         ? _encryption.encrypt(replyToText)
         : null;
-    final expiresAt = expiresInSeconds != null
-        ? DateTime.now()
-              .add(Duration(seconds: expiresInSeconds))
-              .millisecondsSinceEpoch
-        : null;
-
     await chatRef.push().set({
       'text': encryptedText,
       'imageUrl': imageUrl,
+      'imagePath': imagePath,
       'timestamp': ServerValue.timestamp,
       'senderId': _peerId,
       'seen': false,
@@ -694,7 +936,7 @@ class FirebaseService {
       'audioDuration': ?audioDurationSeconds,
       'replyToText': ?encryptedReply,
       'replyToSenderId': ?replyToSenderId,
-      'expiresAt': ?expiresAt,
+      'expiresInSeconds': ?expiresInSeconds,
     });
   }
 
@@ -796,24 +1038,28 @@ class FirebaseService {
     final startedKey = startedRaw is int ? startedRaw : now;
     const validOutcomes = {'completed', 'missed', 'declined'};
     final resolved = validOutcomes.contains(outcome) ? outcome : 'missed';
-    // Two-phase: the deletion must never be hostage to the log write (rules
-    // reject the whole update otherwise and the call stays ringing).
-    await room.update({'call': null});
     final sender = call['callerId']?.toString() ?? '';
-    if (sender.isEmpty) return;
-    await room.update({
-      'messages/call_$startedKey': {
-        'senderId': sender,
-        'timestamp': now,
-        'seen': false,
-        'callType': call['type'],
-        if (connected != null)
-          'callSeconds': max(0, (now - connected) ~/ 1000)
-        else if (wasConnected)
-          'callSeconds': 0,
-        'callOutcome': wasConnected ? 'completed' : resolved,
-      },
-    });
+    if (sender.isNotEmpty) {
+      try {
+        // Log while the call node still exists so the rules can verify this
+        // entry against its caller ID and start timestamp.
+        await room.child('messages/call_$startedKey').set({
+          'senderId': sender,
+          'timestamp': now,
+          'seen': false,
+          'callType': call['type'],
+          'callStartedAt': startedKey,
+          if (connected != null)
+            'callSeconds': max(0, (now - connected) ~/ 1000)
+          else if (wasConnected)
+            'callSeconds': 0,
+          'callOutcome': wasConnected ? 'completed' : resolved,
+        });
+      } catch (_) {
+        // The call must still be cleared if its history entry cannot be saved.
+      }
+    }
+    await room.child('call').remove();
   }
 
   /// Writes this peer's SDP (offer or answer) under `call/signal/{peerId}`.
@@ -916,25 +1162,28 @@ class FirebaseService {
   }
 
   /// Clears all messages in the current room and cleans up cloud images.
+  /// Deletes each message at its member-authorized path rather than requiring
+  /// broad write access to the entire messages collection.
   Future<void> clearAllMessages() async {
     final chatRef = _ensureChatRef();
     if (chatRef == null) return;
-    final urls = <String>[];
     try {
       final snap = await chatRef.get();
       final raw = snap.value;
-      if (raw is Map) {
-        for (final entry in raw.values) {
-          if (entry is Map && entry['imageUrl'] is String) {
-            urls.add(entry['imageUrl'] as String);
-          }
+      if (raw is! Map) return;
+      for (final entry in raw.entries) {
+        final messageKey = entry.key.toString();
+        final imageUrl = entry.value is Map
+            ? (entry.value as Map)['imageUrl']
+            : null;
+        try {
+          await chatRef.child(messageKey).remove();
+          await _deleteStorageUrlBestEffort(imageUrl);
+        } catch (_) {
+          // Continue clearing other messages if one entry cannot be removed.
         }
       }
     } catch (_) {}
-    await chatRef.remove();
-    for (final url in urls) {
-      await _deleteStorageUrlBestEffort(url);
-    }
   }
 
   // Listen for messages (bounded to recent 150 to keep Firebase bandwidth low).
@@ -946,29 +1195,53 @@ class FirebaseService {
     return chatRef.orderByChild('timestamp').limitToLast(limit).onValue;
   }
 
-  // Upload image to Firebase Storage
-  /// Uploads [imageFile] and returns its download URL.
-  ///
-  /// Reports progress (0..1) while the bytes move, and throws
-  /// [MediaUploadException] with a reason instead of returning null: "the
-  /// photo did not upload" and "the message did not save" are different
-  /// problems with different fixes, and a chat screen that blurs them into
-  /// one message cannot be diagnosed from a phone.
-  Future<String> uploadImage(
+  /// Downloads and decrypts a chat photo into bounded memory only. No
+  /// plaintext image is ever written to a cache file.
+  Future<Uint8List?> downloadDecryptedImage(
+    String downloadUrl, {
+    required String roomId,
+  }) async {
+    final secret = _roomSecrets[roomId];
+    if (secret == null) throw const FormatException('Missing room key.');
+    final encrypted = await FirebaseStorage.instance
+        .refFromURL(downloadUrl)
+        .getData(5 * 1024 * 1024 + 28);
+    if (encrypted == null) return null;
+    return EncryptionService.withPassphrase(secret).decryptBytes(encrypted);
+  }
+
+  /// Encrypts photo bytes locally before upload, gives the object a random
+  /// name, and returns its member-readable download URL plus Storage path.
+  Future<({String url, String path})> uploadImage(
     File imageFile, {
     void Function(double progress)? onProgress,
   }) async {
-    final roomSegment = _roomId ?? 'unassigned';
-    final fileName =
-        'images/$roomSegment/${DateTime.now().millisecondsSinceEpoch}.jpg';
+    if (Firebase.apps.isEmpty || authUid == null) {
+      throw const MediaUploadException(
+        'The photo could not be uploaded because secure Firebase sign-in is unavailable.',
+      );
+    }
+    final room = _roomId;
+    final secret = room == null ? null : _roomSecrets[room];
+    if (room == null || secret == null) {
+      throw const MediaUploadException('Pair securely before sending photos.');
+    }
+
+    Reference? objectRef;
     try {
-      final ref = FirebaseStorage.instance.ref().child(fileName);
-      // Explicit content type: storage.rules only allows `image/*`, and
-      // putFile without metadata may send none (depends on platform file
-      // extension guessing) — which the rule would reject.
-      final task = ref.putFile(
-        imageFile,
-        SettableMetadata(contentType: 'image/jpeg'),
+      final plainBytes = await imageFile.readAsBytes();
+      if (plainBytes.isEmpty || plainBytes.length > 5 * 1024 * 1024) {
+        throw const MediaUploadException('Choose a photo smaller than 5 MB.');
+      }
+      final encryptedBytes = EncryptionService.withPassphrase(secret)
+          .encryptBytes(Uint8List.fromList(plainBytes));
+      final objectName = base64UrlEncode(
+        List<int>.generate(24, (_) => _random.nextInt(256)),
+      ).replaceAll('=', '');
+      objectRef = FirebaseStorage.instance.ref('images/$room/$objectName.bin');
+      final task = objectRef.putData(
+        encryptedBytes,
+        SettableMetadata(contentType: 'application/octet-stream'),
       );
       if (onProgress != null) {
         task.snapshotEvents.listen((snapshot) {
@@ -977,16 +1250,24 @@ class FirebaseService {
         });
       }
       await task;
-      final downloadUrl = await ref.getDownloadURL();
-      // Warming the local cache is a convenience; never let it fail a send.
-      try {
-        await MediaCacheService().seedCachedImage(downloadUrl, imageFile);
-      } catch (_) {}
-      return downloadUrl;
+      final downloadUrl = await objectRef.getDownloadURL();
+      return (url: downloadUrl, path: objectRef.fullPath);
     } on FirebaseException catch (e) {
+      if (objectRef != null) {
+        try {
+          await objectRef.delete();
+        } catch (_) {}
+      }
       debugPrint('uploadImage failed: ${e.code} ${e.message}');
       throw MediaUploadException(_uploadReason(e.code));
+    } on MediaUploadException {
+      rethrow;
     } catch (e) {
+      if (objectRef != null) {
+        try {
+          await objectRef.delete();
+        } catch (_) {}
+      }
       debugPrint('uploadImage failed: $e');
       throw const MediaUploadException('The photo could not be uploaded.');
     }
@@ -1059,8 +1340,26 @@ class FirebaseService {
   String getShortCode() => _roomId ?? '';
 
   @visibleForTesting
-  void setRoomIdForTesting(String? code, {bool paired = false}) {
-    _roomId = code?.trim().toUpperCase();
-    _isPaired = paired && _roomId != null;
+  void setRoomIdForTesting(
+    String? code, {
+    bool paired = false,
+    String? secret,
+  }) {
+    if (code == null) {
+      _roomId = null;
+      _chatRef = null;
+      _isPaired = false;
+      _encryption.resetKey();
+      return;
+    }
+    final room = code.trim().toUpperCase();
+    final key = secret ?? _roomSecrets[room] ?? generateRoomSecret();
+    _roomSecrets[room] = key;
+    final testStore = _secureStorageOverride;
+    if (testStore != null) testStore[_roomSecretStorageKey(room)] = key;
+    _roomId = room;
+    _isPaired = paired;
+    _encryption.setRoomKey(key);
+    _chatRef = Firebase.apps.isEmpty ? null : _db.ref('rooms/$room/messages');
   }
 }

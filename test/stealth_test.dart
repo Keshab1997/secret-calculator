@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:calculator/models/calculator_engine.dart';
 import 'package:calculator/screens/chats_screen.dart';
@@ -41,9 +42,9 @@ void main() {
         final service = FirebaseService.forTesting(stateFile);
 
         await service.setCustomPasscode('2580');
-        // Cannot match real unlock code or default 1997
+        // Cannot match the real unlock code; the former default can now be a decoy.
         expect(await service.setDecoyPasscode('2580'), isFalse);
-        expect(await service.setDecoyPasscode('1997'), isFalse);
+        expect(await service.setDecoyPasscode('1997'), isTrue);
         expect(await service.setDecoyPasscode('9999'), isTrue);
         expect(service.decoyPasscode, '9999');
 
@@ -57,31 +58,26 @@ void main() {
     );
 
     test(
-      'MediaCacheService pre-seeds uploaded images and caches voice notes',
+      'decrypted photos use a bounded memory-only cache and clear by room',
       () async {
-        final tempDir = Directory.systemTemp.createTempSync(
-          'media-cache-test-',
-        );
-        addTearDown(() => tempDir.deleteSync(recursive: true));
-        final cache = MediaCacheService()..cacheDirOverride = tempDir;
+        final cache = MediaCacheService();
+        cache.clearRoomImages('TEST01');
+        var loads = 0;
+        Future<Uint8List?> loader() async {
+          loads++;
+          return Uint8List.fromList([1, 2, 3, 4, 5]);
+        }
 
-        final sampleImg = File('${tempDir.path}/source.jpg')
-          ..writeAsBytesSync([1, 2, 3, 4, 5]);
-        const url = 'https://example.com/photo1.jpg';
-        await cache.seedCachedImage(url, sampleImg);
-
-        final cachedImg = await cache.getOrDownloadImage(url);
-        expect(cachedImg, isNotNull);
-        expect(cachedImg!.readAsBytesSync(), [1, 2, 3, 4, 5]);
-
-        final voiceFile = await cache.getOrCacheVoiceNote('payload-1', [
-          9,
-          8,
-          7,
-        ]);
-        expect(voiceFile, isNotNull);
-        expect(voiceFile!.readAsBytesSync(), [9, 8, 7]);
-        cache.cacheDirOverride = null;
+        final first = await cache.getDecryptedImage('TEST01:photo', loader);
+        final second = await cache.getDecryptedImage('TEST01:photo', loader);
+        expect(first, [1, 2, 3, 4, 5]);
+        expect(identical(first, second), isTrue);
+        expect(loads, 1);
+        expect(cache.cachedImageCount, 1);
+        expect(cache.cachedImageBytes, 5);
+        cache.clearRoomImages('TEST01');
+        expect(cache.cachedImageCount, 0);
+        expect(cache.cachedImageBytes, 0);
       },
     );
 

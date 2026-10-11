@@ -48,16 +48,36 @@ class EncryptionService {
   /// Returns `<nonceBase64>:<ciphertextWithTagBase64>`.
   String encrypt(String plainText) {
     final iv = IV.fromSecureRandom(_nonceLengthBytes);
+    final plaintextBytes = plainText.isEmpty
+        ? const <int>[]
+        : Encrypted.fromUtf8(plainText).bytes;
     final encrypter = Encrypter(AES(_key, mode: AESMode.gcm));
-    final encrypted = encrypter.encryptBytes(
-      Uint8List.fromList(
-        plainText.codeUnits.isEmpty
-            ? const <int>[]
-            : Encrypted.fromUtf8(plainText).bytes,
-      ),
-      iv: iv,
-    );
+    final encrypted = encrypter.encryptBytes(plaintextBytes, iv: iv);
     return '${iv.base64}:${encrypted.base64}';
+  }
+
+  /// Encrypts raw media bytes. The serialized binary format is a 12-byte nonce
+  /// followed by AES-GCM ciphertext and its 16-byte authentication tag.
+  Uint8List encryptBytes(Uint8List plainBytes) {
+    final iv = IV.fromSecureRandom(_nonceLengthBytes);
+    final encrypter = Encrypter(AES(_key, mode: AESMode.gcm));
+    final encrypted = encrypter.encryptBytes(plainBytes, iv: iv);
+    return Uint8List.fromList([...iv.bytes, ...encrypted.bytes]);
+  }
+
+  /// Decrypts raw bytes produced by [encryptBytes], verifying the GCM tag.
+  Uint8List decryptBytes(Uint8List payload) {
+    if (payload.length < _nonceLengthBytes + 16) {
+      throw const FormatException('Ciphertext too short.');
+    }
+    final iv = IV(payload.sublist(0, _nonceLengthBytes));
+    final encrypted = Encrypted(payload.sublist(_nonceLengthBytes));
+    try {
+      final encrypter = Encrypter(AES(_key, mode: AESMode.gcm));
+      return Uint8List.fromList(encrypter.decryptBytes(encrypted, iv: iv));
+    } catch (error) {
+      throw FormatException('Decryption failed: $error');
+    }
   }
 
   /// Decrypts a payload produced by [encrypt].

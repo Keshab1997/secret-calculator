@@ -447,7 +447,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 10),
               const Text(
-                'To invite someone, open Chats → Pair new contact. Each conversation has its own pairing code. Unpair a contact from that chat\'s menu.',
+                'To invite someone, open Chats → Pair new contact and share the full secure invite through a trusted channel. The room ID alone cannot join. Existing conversations may need to be paired again after the security update.',
                 style: TextStyle(fontSize: 13, height: 1.35),
               ),
             ],

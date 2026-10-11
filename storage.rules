@@ -2,11 +2,18 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     match /images/{roomId}/{fileName} {
-      allow read: if roomId.matches('^[A-Z0-9]{6}$');
-      allow write: if roomId.matches('^[A-Z0-9]{6}$')
-                   && request.resource != null
-                   && request.resource.size < 5 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
+      // Objects contain client-side AES-GCM ciphertext. Listing is disabled;
+      // object names are random and plaintext is never uploaded.
+      allow get: if request.auth != null
+                 && roomId.matches('^[A-Z0-9]{6}$');
+      allow list: if false;
+      allow create: if request.auth != null
+                    && roomId.matches('^[A-Z0-9]{6}$')
+                    && request.resource != null
+                    && request.resource.size <= 5 * 1024 * 1024 + 28
+                    && request.resource.contentType == 'application/octet-stream';
+      allow delete: if request.auth != null
+                    && roomId.matches('^[A-Z0-9]{6}$');
     }
 
     match /{allPaths=**} {

@@ -4,7 +4,6 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
 import '../services/update_service.dart';
 import '../widgets/messaging_style.dart';
@@ -239,10 +238,17 @@ class _ChatsScreenState extends State<ChatsScreen>
     final raw = _rooms[code]?['messages'];
     final now = DateTime.now().millisecondsSinceEpoch;
     final values = raw is Map
-        ? raw.values
-              .whereType<Map>()
-              .where((m) => m['expiresAt'] is! int || m['expiresAt'] > now)
-              .toList()
+        ? raw.values.whereType<Map>().where((message) {
+            final expiresAt = message['expiresAt'];
+            final timestamp = message['timestamp'];
+            final seconds = message['expiresInSeconds'];
+            final effectiveExpiry = expiresAt is int
+                ? expiresAt
+                : timestamp is int && seconds is int
+                ? timestamp + seconds * 1000
+                : null;
+            return effectiveExpiry == null || effectiveExpiry > now;
+          }).toList()
         : <Map>[];
     values.sort(
       (a, b) => ((b['timestamp'] as int?) ?? 0).compareTo(
@@ -264,8 +270,7 @@ class _ChatsScreenState extends State<ChatsScreen>
     if (message['imageUrl'] != null) return 'Photo';
     if (message['audioData'] != null) return 'Voice message';
     try {
-      final text = EncryptionService.withPassphrase(code)
-          .decrypt(message['text'] as String);
+      final text = _service.decryptTextForRoom(code, message['text'] as String);
       if (text.startsWith('sticker:v1:')) return 'Sticker';
       return text;
     } catch (_) {
@@ -352,6 +357,39 @@ class _ChatsScreenState extends State<ChatsScreen>
                 : const ProfileScreen()
           : Column(
               children: [
+                if (!widget.decoyMode && _service.needsSecureRePair)
+                  Container(
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF4D6),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: const Color(0xFFE7C66A)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.security, color: Color(0xFF8A6500)),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            'Security update: pair each contact again using a secure invite. Old room codes alone no longer open conversations.',
+                            style: TextStyle(color: Color(0xFF594300)),
+                          ),
+                        ),
+                        TextButton(onPressed: _pair, child: const Text('Pair')),
+                        IconButton(
+                          tooltip: 'Dismiss security notice',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () async {
+                            await _service.acknowledgeSecureRePairNotice();
+                            if (mounted) setState(() {});
+                          },
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                      ],
+                    ),
+                  ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   child: TextField(

@@ -4,20 +4,46 @@
     ".write": false,
     "rooms": {
       "$room": {
-        ".read": "$room.matches(/^[A-Z0-9]{6}$/)",
-        ".write": "$room.matches(/^[A-Z0-9]{6}$/)",
+        ".read": "auth != null && data.child('members').child(auth.uid).exists()",
+        "members": {
+          "$uid": {
+            ".write": "auth != null && auth.uid == $uid && data.exists() && !newData.exists()"
+          }
+        },
         "messages": {
-          ".indexOn": ["timestamp"],
+          ".indexOn": ["timestamp", "expiresAt"],
           "$messageId": {
-            ".validate": "newData.hasChildren(['senderId', 'timestamp']) && newData.child('senderId').isString() && newData.child('senderId').val().length > 0"
+            ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).exists() && ((!data.exists() && (newData.child('senderId').val() == root.child('rooms').child($room).child('members').child(auth.uid).child('peerId').val() || (newData.child('callStartedAt').isNumber() && newData.child('callType').isString() && newData.child('callOutcome').isString() && root.child('rooms').child($room).child('call').child('callerId').val() == newData.child('senderId').val() && root.child('rooms').child($room).child('call').child('startedAt').val() == newData.child('callStartedAt').val()))) || !newData.exists() || (data.exists() && newData.child('senderId').val() == data.child('senderId').val() && newData.child('timestamp').val() == data.child('timestamp').val() && newData.child('expiresInSeconds').val() == data.child('expiresInSeconds').val() && newData.child('expiresAt').val() == data.child('expiresAt').val()))",
+            ".validate": "!newData.exists() || (newData.hasChildren(['senderId', 'timestamp']) && newData.child('senderId').isString() && newData.child('senderId').val().length == 16 && newData.child('timestamp').isNumber() && (!newData.child('text').exists() || (newData.child('text').isString() && newData.child('text').val().length <= 20000)) && (!newData.child('imageUrl').exists() || (newData.child('imageUrl').isString() && newData.child('imageUrl').val().length <= 4096)) && (!newData.child('imagePath').exists() || (newData.child('imagePath').isString() && newData.child('imagePath').val().length <= 256)) && (!newData.child('audioData').exists() || (newData.child('audioData').isString() && newData.child('audioData').val().length <= 10000000)) && (!newData.child('callStartedAt').exists() || newData.child('callStartedAt').isNumber()) && (!newData.child('callType').exists() || (newData.child('callType').isString() && (newData.child('callType').val() == 'voice' || newData.child('callType').val() == 'video'))) && (!newData.child('callOutcome').exists() || (newData.child('callOutcome').isString() && (newData.child('callOutcome').val() == 'completed' || newData.child('callOutcome').val() == 'missed' || newData.child('callOutcome').val() == 'declined'))) && (!newData.child('expiresInSeconds').exists() || (newData.child('expiresInSeconds').isNumber() && (newData.child('expiresInSeconds').val() == 30 || newData.child('expiresInSeconds').val() == 300 || newData.child('expiresInSeconds').val() == 3600))) && (!newData.child('expiresAt').exists() || (data.exists() && newData.child('expiresAt').isNumber() && newData.child('expiresAt').val() == data.child('expiresAt').val())))"
           }
         },
         "status": {
           "$peerId": {
-            ".validate": "newData.hasChildren(['isOnline', 'lastSeen']) && newData.child('isOnline').isBoolean()"
+            ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).child('peerId').val() == $peerId",
+            ".validate": "newData.hasChildren(['isOnline', 'lastSeen']) && newData.child('isOnline').isBoolean() && newData.child('lastSeen').isNumber() && (!newData.child('isTyping').exists() || newData.child('isTyping').isBoolean())"
           }
+        },
+        "tokens": {
+          "$peerId": {
+            ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).child('peerId').val() == $peerId",
+            ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 4096"
+          }
+        },
+        "profiles": {
+          "$peerId": {
+            ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).child('peerId').val() == $peerId",
+            ".validate": "newData.isString() && newData.val().length <= 500000"
+          }
+        },
+        "call": {
+          ".write": "auth != null && root.child('rooms').child($room).child('members').child(auth.uid).exists()"
         }
       }
+    },
+    "expiring": {
+      ".read": false,
+      ".write": false,
+      ".indexOn": ["expiresAt"]
     }
   }
 }

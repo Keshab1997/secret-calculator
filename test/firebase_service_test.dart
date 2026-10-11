@@ -24,6 +24,21 @@ void main() {
       expect(FirebaseService.isValidRoomCode('AB-123'), isFalse);
     });
 
+    test('secure invitations include a separate 256-bit secret', () {
+      for (var i = 0; i < 10; i++) {
+        final room = FirebaseService.generateRoomCode();
+        final secret = FirebaseService.generateRoomSecret();
+        expect(secret.length, 43);
+        expect(FirebaseService.isValidInviteCode('$room.$secret'), isTrue);
+        final parsed = FirebaseService.parseInviteCode(
+          '${room.toLowerCase()}.$secret',
+        );
+        expect(parsed?.roomId, room);
+        expect(parsed?.secret, secret);
+        expect(FirebaseService.isValidInviteCode(room), isFalse);
+      }
+    });
+
     test('getShortCode returns full 6-character room code', () {
       final service = FirebaseService();
       service.setRoomIdForTesting('k7m9p2');

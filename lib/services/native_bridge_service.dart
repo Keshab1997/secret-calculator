@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,7 +7,6 @@ import 'package:local_auth/local_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'encryption_service.dart';
-import 'media_cache_service.dart';
 
 class NativeBridgeService {
   static final NativeBridgeService _instance = NativeBridgeService._internal();
@@ -14,10 +14,28 @@ class NativeBridgeService {
   NativeBridgeService._internal();
 
   final LocalAuthentication _localAuth = LocalAuthentication();
+  File? _activeVoiceTempFile;
+  Timer? _voiceTempCleanupTimer;
 
   static const MethodChannel _channel = MethodChannel(
     'com.keshabstudios.calculator/native',
   );
+
+  /// Removes voice playback temp directories left behind if the process was
+  /// killed before the normal playback/stop cleanup could run.
+  Future<void> cleanupStaleVoicePlaybackFiles() async {
+    try {
+      final temporary = Directory.systemTemp;
+      await for (final entity in temporary.list()) {
+        final name = entity.path.split(Platform.pathSeparator).last;
+        if (name.startsWith('secret_calc_voice_')) {
+          try {
+            await entity.delete(recursive: true);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
 
   Future<bool> ensureMicPermission() async {
     try {
@@ -83,40 +101,61 @@ class NativeBridgeService {
     }
   }
 
-  /// Decrypts an AES-256-GCM encrypted base64 audio payload, writes it to a
-  /// temporary `.m4a` file, and plays it via the native media player.
-  /// Testing seam: when set, [playEncryptedAudio] delegates to this instead
-  /// of decrypting and touching the disk — the UI's play/stop/progress
-  /// behavior does not depend on any of that.
+  /// Decrypts an AES-256-GCM encrypted base64 payload to a short-lived
+  /// temporary file for native playback. The file is removed on stop or after
+  /// the native-reported playback duration; it is never kept as a media cache.
+  /// Testing seam: when set, [playEncryptedAudio] avoids touching disk.
   @visibleForTesting
   Future<bool> Function(String payload, EncryptionService encryption)?
   playEncryptedAudioForTesting;
 
   Future<bool> playEncryptedAudio(
     String encryptedBase64Payload,
-    EncryptionService encryption,
-  ) async {
+    EncryptionService encryption, {
+    int? durationSeconds,
+  }) async {
     final override = playEncryptedAudioForTesting;
     if (override != null) {
       return override(encryptedBase64Payload, encryption);
     }
+    File? targetFile;
     try {
       final decryptedBase64 = encryption.decrypt(encryptedBase64Payload);
       final bytes = base64Decode(decryptedBase64);
-      final cached = await MediaCacheService().getOrCacheVoiceNote(
-        encryptedBase64Payload,
-        bytes,
+      if (bytes.isEmpty) return false;
+      await stopAudio();
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'secret_calc_voice_',
       );
-      final targetFile =
-          cached ??
-          (await File(
-            '${Directory.systemTemp.path}/voice_play_${DateTime.now().millisecondsSinceEpoch}.m4a',
-          ).writeAsBytes(bytes, flush: true));
-      await playAudioFile(targetFile.path);
+      targetFile = File('${tempDirectory.path}/playback.m4a');
+      await targetFile.writeAsBytes(bytes, flush: true);
+      _activeVoiceTempFile = targetFile;
+      final nativeDurationMs = await playAudioFile(targetFile.path);
+      final fallbackMs = (durationSeconds ?? 60).clamp(1, 3600).toInt() * 1000;
+      final cleanupMs = (nativeDurationMs ?? fallbackMs)
+          .clamp(1000, 3600000)
+          .toInt();
+      _voiceTempCleanupTimer?.cancel();
+      _voiceTempCleanupTimer = Timer(
+        Duration(milliseconds: cleanupMs + 1500),
+        () => unawaited(_deleteVoiceTempFile(targetFile!)),
+      );
       return true;
     } catch (_) {
+      if (targetFile != null) await _deleteVoiceTempFile(targetFile);
       return false;
     }
+  }
+
+  Future<void> _deleteVoiceTempFile(File file) async {
+    if (_activeVoiceTempFile?.path == file.path) {
+      _activeVoiceTempFile = null;
+      _voiceTempCleanupTimer?.cancel();
+      _voiceTempCleanupTimer = null;
+    }
+    try {
+      if (await file.exists()) await file.parent.delete(recursive: true);
+    } catch (_) {}
   }
 
   Future<void> stopAudio() async {
@@ -127,6 +166,10 @@ class NativeBridgeService {
     } on PlatformException {
       // Ignore stop errors.
     }
+    _voiceTempCleanupTimer?.cancel();
+    _voiceTempCleanupTimer = null;
+    final file = _activeVoiceTempFile;
+    if (file != null) await _deleteVoiceTempFile(file);
   }
 
   Future<void> setSpeakerphone(bool enabled) async {
