@@ -612,12 +612,22 @@ class FirebaseService {
   }
 
   /// Accepts an incoming call in the current room.
-  Future<void> acceptCall() async {
-    if (_roomId == null || Firebase.apps.isEmpty) return;
-    await _db.ref().child('rooms').child(_roomId!).child('call').update({
-      'status': 'connected',
-      'connectedAt': ServerValue.timestamp,
+  ///
+  /// Returns false when the call node is already gone (the caller hung up
+  /// first). Accepting must never resurrect a deleted call node — that would
+  /// leave a zombie "connected" call the other side can never clear.
+  Future<bool> acceptCall() async {
+    if (_roomId == null || Firebase.apps.isEmpty) return false;
+    final callRef = _db.ref('rooms/$_roomId/call');
+    final result = await callRef.runTransaction((Object? value) {
+      if (value is! Map) return Transaction.abort();
+      return Transaction.success({...value, 'status': 'connected'});
     });
+    if (!result.committed) return false;
+    try {
+      await callRef.update({'connectedAt': ServerValue.timestamp});
+    } catch (_) {}
+    return true;
   }
 
   /// Ends or declines the active call in the current room and logs it in the
@@ -627,31 +637,46 @@ class FirebaseService {
   /// 'missed' (nobody accepted — ring timeout, offline callee, or the caller
   /// cancelled) or 'declined' (the callee rejected). A connected call always
   /// logs as 'completed' with its duration.
-  Future<void> endCall({String outcome = 'completed'}) async {
+  ///
+  /// Pass [callInfo] (the local copy of the call node) to skip the read
+  /// round-trip — the caller's own screen already knows the facts, and a
+  /// `get()` that fails on a flaky network must never leave the call ringing
+  /// on the other phone.
+  Future<void> endCall({String outcome = 'completed', Map? callInfo}) async {
     if (_roomId == null || Firebase.apps.isEmpty) return;
     final room = _db.ref('rooms/$_roomId');
-    final snapshot = await room.child('call').get();
-    final call = snapshot.value;
-    if (call is! Map) return;
+    Map? call = callInfo;
+    if (call == null) {
+      final snapshot = await room.child('call').get();
+      if (snapshot.value is! Map) return;
+      call = Map.from(snapshot.value as Map);
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
-    final connected = call['connectedAt'] as int?;
+    final connected = (call['connectedAt'] as num?)?.toInt();
+    final wasConnected =
+        connected != null || call['status']?.toString() == 'connected';
     // The node must always be cleared, even if the timestamp write is still
     // pending — otherwise both sides are stuck on a ringing screen forever.
     final startedRaw = call['startedAt'];
     final startedKey = startedRaw is int ? startedRaw : now;
     const validOutcomes = {'completed', 'missed', 'declined'};
     final resolved = validOutcomes.contains(outcome) ? outcome : 'missed';
+    // Two-phase: the deletion must never be hostage to the log write (rules
+    // reject the whole update otherwise and the call stays ringing).
+    await room.update({'call': null});
+    final sender = call['callerId']?.toString() ?? '';
+    if (sender.isEmpty) return;
     await room.update({
-      'call': null,
       'messages/call_$startedKey': {
-        'senderId': call['callerId'],
+        'senderId': sender,
         'timestamp': now,
         'seen': false,
         'callType': call['type'],
-        'callSeconds': connected == null
-            ? null
-            : max(0, (now - connected) ~/ 1000),
-        'callOutcome': connected == null ? resolved : 'completed',
+        if (connected != null)
+          'callSeconds': max(0, (now - connected) ~/ 1000)
+        else if (wasConnected)
+          'callSeconds': 0,
+        'callOutcome': wasConnected ? 'completed' : resolved,
       },
     });
   }

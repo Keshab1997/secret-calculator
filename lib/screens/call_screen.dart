@@ -61,6 +61,7 @@ class _CallScreenState extends State<CallScreen> {
   StreamSubscription<DatabaseEvent>? _callSub;
   Timer? _durationTimer;
   Timer? _ringTimer;
+  Timer? _connectionWatchdog;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -163,6 +164,15 @@ class _CallScreenState extends State<CallScreen> {
     _pc!.onConnectionState = (state) {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
         _failCall();
+      } else if (state ==
+          RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        // Media lost (the peer hung up or vanished). If the end event never
+        // arrives, this watchdog closes the call instead of leaving a live
+        // screen counting up forever.
+        _startConnectionWatchdog();
+      } else if (state ==
+          RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
+        _connectionWatchdog?.cancel();
       }
     };
     await _applySpeaker();
@@ -325,9 +335,16 @@ class _CallScreenState extends State<CallScreen> {
     if (_accepting) return;
     _accepting = true;
     try {
-      await _firebase.acceptCall();
+      final accepted = await _firebase.acceptCall();
+      if (!accepted) {
+        // The caller hung up before accept landed — close instead of
+        // resurrecting a dead call.
+        _closeCallScreen();
+        return;
+      }
       if (mounted) {
         setState(() => _callStatus = 'connected');
+        _ringTimer?.cancel();
         _startDurationTimer();
       }
       // Media and the peer connection only start after the user accepts.
@@ -348,7 +365,7 @@ class _CallScreenState extends State<CallScreen> {
 
   Future<void> _endCall() async {
     try {
-      await _firebase.endCall(outcome: _hangupOutcome);
+      await _firebase.endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw);
     } catch (_) {}
     _closeCallScreen();
   }
@@ -357,7 +374,7 @@ class _CallScreenState extends State<CallScreen> {
     if (_disposed || _isClosing || !mounted) return;
     _isClosing = true;
     try {
-      await _firebase.endCall(outcome: _hangupOutcome);
+      await _firebase.endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw);
     } catch (_) {}
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -387,12 +404,24 @@ class _CallScreenState extends State<CallScreen> {
     _ringTimer = Timer(ringTimeout, _onRingTimeout);
   }
 
+  /// Closes a connected call whose media died without an end event. WebRTC
+  /// can recover from a brief `disconnected`, so this waits out a grace
+  /// period first.
+  void _startConnectionWatchdog() {
+    _connectionWatchdog?.cancel();
+    _connectionWatchdog = Timer(const Duration(seconds: 8), () {
+      if (_disposed || _isClosing || !mounted) return;
+      if (_callStatus != 'connected') return; // ring timeout owns this phase
+      _endCall();
+    });
+  }
+
   /// Nobody accepted in time: log the call as missed (even if this side is
   /// the callee — ringing out is not a decline) and close on both sides.
   Future<void> _onRingTimeout() async {
     if (_disposed || _isClosing || _callStatus == 'connected') return;
     try {
-      await _firebase.endCall(outcome: 'missed');
+      await _firebase.endCall(outcome: 'missed', callInfo: _lastCallRaw);
     } catch (_) {}
     _closeCallScreen();
   }
@@ -463,11 +492,14 @@ class _CallScreenState extends State<CallScreen> {
     _disposed = true;
     _durationTimer?.cancel();
     _ringTimer?.cancel();
+    _connectionWatchdog?.cancel();
     _callSub?.cancel();
     _teardownWebRTC();
     _native.stopAudio();
     // Swiping back hangs up for everyone; a no-op if the node is already gone.
-    _firebase.endCall(outcome: _hangupOutcome).catchError((_) {});
+    _firebase
+        .endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw)
+        .catchError((_) {});
     super.dispose();
   }
 
