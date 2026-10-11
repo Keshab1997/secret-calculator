@@ -503,11 +503,33 @@ class FirebaseService {
     return const {};
   }
 
-  Stream<DatabaseEvent> roomStream(String room) {
+  /// How many recent messages the paired-directory screen keeps per room, so
+  /// opening the directory never downloads full message history.
+  static const int directoryMessageLimit = 50;
+
+  /// Bounded stream of the recent messages in [room] for directory previews,
+  /// unread badges, and the recent-calls list.
+  Stream<DatabaseEvent> roomMessagesStream(
+    String room, {
+    int limit = directoryMessageLimit,
+  }) {
     if (Firebase.apps.isEmpty || !_pairedRooms.containsKey(room)) {
       return const Stream.empty();
     }
-    return _db.ref('rooms/$room').onValue;
+    return _db
+        .ref('rooms/$room/messages')
+        .orderByChild('timestamp')
+        .limitToLast(limit)
+        .onValue;
+  }
+
+  /// Stream of one metadata child of [room] ('profiles', 'call', ...) so the
+  /// directory can watch names and ringing calls without syncing messages.
+  Stream<DatabaseEvent> roomChildStream(String room, String child) {
+    if (Firebase.apps.isEmpty || !_pairedRooms.containsKey(room)) {
+      return const Stream.empty();
+    }
+    return _db.ref('rooms/$room/$child').onValue;
   }
 
   /// Lightweight stream of only the latest message in [room] so background

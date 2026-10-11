@@ -85,9 +85,46 @@ void main() {
       },
     );
 
-    testWidgets('ChatsScreen decoyMode hides paired rooms and FAB', (
+    testWidgets('ChatsScreen decoyMode hides paired rooms and security', (
       tester,
     ) async {
+      final tempDir = Directory.systemTemp.createTempSync('decoy-widget-');
+      addTearDown(() => tempDir.deleteSync(recursive: true));
+      final service = FirebaseService()
+        ..stateFileOverride = File('${tempDir.path}/state.json');
+      // Real file I/O must run inside runAsync under the test binding.
+      await tester.runAsync(() async {
+        for (final code in ['AB23CD', 'EF45GH']) {
+          service.setRoomIdForTesting(code);
+          await service.markRoomPaired();
+        }
+      });
+      addTearDown(() async {
+        await tester.runAsync(() async {
+          for (final code in ['AB23CD', 'EF45GH']) {
+            service.setRoomIdForTesting(code);
+            await service.leaveRoom();
+          }
+          service.setRoomIdForTesting(null);
+          service.stateFileOverride = null;
+        });
+      });
+
+      // Control: with real pairs present, the directory lists them and the
+      // You tab shows the real security settings.
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: messagingTheme,
+          home: const ChatsScreen(decoyMode: false),
+        ),
+      );
+      expect(find.text('Paired contact'), findsNWidgets(2));
+      await tester.tap(find.text('You'));
+      await tester.pump();
+      expect(find.textContaining('Decoy passcode'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+
+      // Decoy: same service state, but the view must show nothing real.
       await tester.pumpWidget(
         MaterialApp(
           theme: messagingTheme,
@@ -95,7 +132,16 @@ void main() {
         ),
       );
       expect(find.text('Your private conversations'), findsOneWidget);
+      expect(find.text('Paired contact'), findsNothing);
+      expect(find.text('Say hello'), findsNothing);
       expect(find.byTooltip('Pair new contact'), findsNothing);
+
+      // Decoy "You" tab must not expose real security settings.
+      await tester.tap(find.text('You'));
+      await tester.pump();
+      expect(find.text('Your profile'), findsOneWidget);
+      expect(find.textContaining('Decoy passcode'), findsNothing);
+      expect(find.textContaining('unlock code'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     });
   });

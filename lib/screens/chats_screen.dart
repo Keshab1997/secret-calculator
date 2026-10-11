@@ -20,7 +20,7 @@ class ChatsScreen extends StatefulWidget {
 
 class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
   final _service = FirebaseService();
-  final Map<String, StreamSubscription<DatabaseEvent>> _subscriptions = {};
+  final Map<String, List<StreamSubscription<DatabaseEvent>>> _subscriptions = {};
   final Map<String, Map> _rooms = {};
   String _query = '';
   String? _error;
@@ -38,7 +38,10 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused && !_opening && mounted) {
+    if ((state == AppLifecycleState.paused ||
+            state == AppLifecycleState.hidden) &&
+        !_opening &&
+        mounted) {
       Navigator.of(context).popUntil((route) => route.isFirst);
     }
   }
@@ -46,50 +49,67 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
   void _subscribe() {
     for (final code in _subscriptions.keys.toList()) {
       if (!_service.pairedRooms.containsKey(code)) {
-        _subscriptions.remove(code)?.cancel();
+        for (final sub in _subscriptions.remove(code) ?? const []) {
+          sub.cancel();
+        }
         _rooms.remove(code);
       }
     }
     for (final code in _service.pairedRooms.keys) {
-      _subscriptions.putIfAbsent(
-        code,
-        () => _service
-            .roomStream(code)
-            .listen(
-              (event) {
-                if (!mounted) return;
-                final value = event.snapshot.value;
-                setState(() {
-                  _rooms[code] = value is Map ? value : {};
-                  _error = null;
-                });
-                final call = _rooms[code]?['call'];
-                if (!_opening &&
-                    ModalRoute.of(context)?.isCurrent == true &&
-                    call is Map &&
-                    call['status'] == 'ringing' &&
-                    call['callerId'] != _service.peerId) {
-                  _incomingCall(code, call['type'] == 'video');
-                }
-              },
-              onError: (_) {
-                if (mounted) {
-                  setState(
-                    () => _error =
-                        'Could not refresh chats. Check your connection.',
-                  );
-                }
-              },
-            ),
-      );
+      if (_subscriptions.containsKey(code)) continue;
+      _rooms.putIfAbsent(code, () => <String, dynamic>{});
+      void putChild(String child, Object? value) {
+        if (!mounted) return;
+        setState(() {
+          _rooms[code] = {
+            ...?_rooms[code],
+            child: value is Map ? value : <String, dynamic>{},
+          };
+          _error = null;
+        });
+      }
+
+      void onError(Object _) {
+        if (mounted) {
+          setState(
+            () => _error = 'Could not refresh chats. Check your connection.',
+          );
+        }
+      }
+
+      _subscriptions[code] = [
+        _service.roomMessagesStream(code).listen(
+          (event) => putChild('messages', event.snapshot.value),
+          onError: onError,
+        ),
+        _service.roomChildStream(code, 'profiles').listen(
+          (event) => putChild('profiles', event.snapshot.value),
+          onError: onError,
+        ),
+        _service.roomChildStream(code, 'call').listen((event) {
+          if (!mounted) return;
+          final call = event.snapshot.value;
+          final routeIsCurrent = ModalRoute.of(context)?.isCurrent == true;
+          putChild('call', call);
+          if (!_opening &&
+              routeIsCurrent &&
+              call is Map &&
+              call['status'] == 'ringing' &&
+              call['callerId'] != _service.peerId) {
+            _incomingCall(code, call['type'] == 'video');
+          }
+        }, onError: onError),
+      ];
     }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    for (final sub in _subscriptions.values) {
-      sub.cancel();
+    for (final subs in _subscriptions.values) {
+      for (final sub in subs) {
+        sub.cancel();
+      }
     }
     super.dispose();
   }
@@ -201,17 +221,24 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    final codes =
-        _service.pairedRooms.keys.where((code) {
-          final p = _service.partnerProfile(code, _rooms[code]?['profiles']);
-          return '${p['name'] ?? 'Paired contact'} $code'
-              .toLowerCase()
-              .contains(_query.toLowerCase());
-        }).toList()..sort((a, b) {
-          final ma = _messages(a), mb = _messages(b);
-          return (mb.isEmpty ? 0 : (mb.first['timestamp'] as int? ?? 0))
-              .compareTo(ma.isEmpty ? 0 : (ma.first['timestamp'] as int? ?? 0));
-        });
+    final codes = widget.decoyMode
+        ? <String>[]
+        : (_service.pairedRooms.keys.where((code) {
+              final p = _service.partnerProfile(
+                code,
+                _rooms[code]?['profiles'],
+              );
+              return '${p['name'] ?? 'Paired contact'} $code'
+                  .toLowerCase()
+                  .contains(_query.toLowerCase());
+            }).toList()
+              ..sort((a, b) {
+                final ma = _messages(a), mb = _messages(b);
+                return (mb.isEmpty ? 0 : (mb.first['timestamp'] as int? ?? 0))
+                    .compareTo(
+                      ma.isEmpty ? 0 : (ma.first['timestamp'] as int? ?? 0),
+                    );
+              }));
     final calls = <Map<String, dynamic>>[];
     for (final code in codes) {
       for (final m in _messages(code).where((m) => m['callType'] != null)) {
@@ -249,7 +276,15 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
         ],
       ),
       body: _tab == 2
-          ? const ProfileScreen()
+          ? widget.decoyMode
+                // Decoy mode never exposes real security settings — the You
+                // tab shows the same empty-state story as the chats list.
+                ? _empty(
+                    'Your profile',
+                    'Pair a device to set up your profile.',
+                    Icons.person_outline,
+                  )
+                : const ProfileScreen()
           : Column(
               children: [
                 Padding(
