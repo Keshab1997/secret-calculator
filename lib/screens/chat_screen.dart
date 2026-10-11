@@ -93,6 +93,10 @@ class _ChatScreenState extends State<ChatScreen>
   String _searchQuery = '';
   bool _isPartnerOnline = false;
   bool _isPartnerTyping = false;
+
+  /// Id of the message that arrived most recently; only that bubble plays the
+  /// entrance animation (see [_buildMessageBubble]).
+  String? _freshMessageId;
   bool _myReportedTyping = false;
   String _partnerLastSeen = '';
   bool _messagesPrimed = false;
@@ -364,6 +368,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (!mounted) return;
       final previousCount = _messages.length;
+      final previousNewestId = _messages.isEmpty ? null : _messages.last.id;
       setState(() {
         _messages
           ..clear()
@@ -371,6 +376,11 @@ class _ChatScreenState extends State<ChatScreen>
       });
 
       if (rebuilt.length > previousCount) {
+        final newestId = rebuilt.isEmpty ? null : rebuilt.last.id;
+        if (newestId != null && newestId != previousNewestId) {
+          _freshMessageId = newestId;
+          _messageAnimController.forward(from: 0);
+        }
         _scrollToBottom();
       }
 
@@ -1371,21 +1381,19 @@ class _ChatScreenState extends State<ChatScreen>
                                 ],
                               ],
                             ),
-                            Text(
-                              _statusSubtitle(),
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontStyle: _isPartnerTyping
-                                    ? FontStyle.italic
-                                    : FontStyle.normal,
-                                color: _isPartnerTyping
-                                    ? Colors.amberAccent
-                                    : (_isPartnerOnline
-                                          ? Colors.greenAccent
-                                          : Colors.grey[400]),
+                            if (_isPartnerTyping)
+                              const _TypingDots()
+                            else
+                              Text(
+                                _statusSubtitle(),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: _isPartnerOnline
+                                      ? Colors.greenAccent
+                                      : Colors.grey[400],
+                                ),
+                                overflow: TextOverflow.ellipsis,
                               ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
                           ],
                         ),
                       ),
@@ -1756,9 +1764,10 @@ class _ChatScreenState extends State<ChatScreen>
                                   : Colors.white,
                             ),
                             onPressed: hasTypedText
-                                ? () => _sendMessage(
-                                    text: _messageController.text,
-                                  )
+                                ? () {
+                                    HapticFeedback.selectionClick();
+                                    _sendMessage(text: _messageController.text);
+                                  }
                                 : () {},
                           ),
                         ),
@@ -1767,56 +1776,69 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                 ),
               ),
-              if (_showEmojiPicker || _showStickerKeyboard)
-                Container(
-                  color: Colors.white,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: () => setState(() {
-                            _showEmojiPicker = true;
-                            _showStickerKeyboard = false;
-                          }),
-                          icon: const Icon(Icons.emoji_emotions_outlined),
-                          label: const Text('Emoji'),
+              // One animated container for the whole keyboard area, so the
+              // panel slides open and shut instead of popping.
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                curve: Curves.easeOutCubic,
+                alignment: Alignment.topCenter,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (_showEmojiPicker || _showStickerKeyboard)
+                      Container(
+                        color: Colors.white,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: () => setState(() {
+                                  _showEmojiPicker = true;
+                                  _showStickerKeyboard = false;
+                                }),
+                                icon: const Icon(Icons.emoji_emotions_outlined),
+                                label: const Text('Emoji'),
+                              ),
+                            ),
+                            Expanded(
+                              child: TextButton.icon(
+                                onPressed: () => setState(() {
+                                  _showEmojiPicker = false;
+                                  _showStickerKeyboard = true;
+                                }),
+                                icon: const Icon(Icons.emoji_objects_outlined),
+                                label: const Text('Stickers'),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Close keyboard',
+                              onPressed: () => setState(() {
+                                _showEmojiPicker = false;
+                                _showStickerKeyboard = false;
+                              }),
+                              icon: const Icon(Icons.keyboard_arrow_down),
+                            ),
+                          ],
                         ),
                       ),
-                      Expanded(
-                        child: TextButton.icon(
-                          onPressed: () => setState(() {
-                            _showEmojiPicker = false;
-                            _showStickerKeyboard = true;
-                          }),
-                          icon: const Icon(Icons.emoji_objects_outlined),
-                          label: const Text('Stickers'),
-                        ),
+                    if (_showEmojiPicker)
+                      EmojiKeyboard(
+                        controller: _messageController,
+                        onTextChanged: () =>
+                            _onInputChanged(_messageController.text),
+                        onEmojiSelected: (_) =>
+                            _onInputChanged(_messageController.text),
+                        backgroundColor: _theme.appBarColor,
                       ),
-                      IconButton(
-                        tooltip: 'Close keyboard',
-                        onPressed: () => setState(() {
-                          _showEmojiPicker = false;
-                          _showStickerKeyboard = false;
-                        }),
-                        icon: const Icon(Icons.keyboard_arrow_down),
+                    if (_showStickerKeyboard)
+                      StickerKeyboard(
+                        onStickerSelected: (emoji) =>
+                            _sendMessage(text: 'sticker:v1:$emoji'),
                       ),
-                    ],
-                  ),
+                  ],
                 ),
-              if (_showEmojiPicker)
-                EmojiKeyboard(
-                  controller: _messageController,
-                  onTextChanged: () => _onInputChanged(_messageController.text),
-                  onEmojiSelected: (_) =>
-                      _onInputChanged(_messageController.text),
-                  backgroundColor: _theme.appBarColor,
-                ),
-              if (_showStickerKeyboard)
-                StickerKeyboard(
-                  onStickerSelected: (emoji) =>
-                      _sendMessage(text: 'sticker:v1:$emoji'),
-                ),
+              ),
             ],
           ),
         ),
@@ -1869,299 +1891,344 @@ class _ChatScreenState extends State<ChatScreen>
             isMe: message.isMe,
           );
 
-    // Create a simple slide+fade animation for new messages
-    final animController = _messageAnimController;
+    // Only the message that just arrived plays an entrance; the controller
+    // stays parked at 1 for every other bubble, so an incoming snapshot can
+    // never make the whole list shimmer.
+    final isArriving = message.id == _freshMessageId;
+    final bubble = GestureDetector(
+      onLongPress: () => _showMessageActions(message),
+      onHorizontalDragEnd: (details) {
+        if ((details.primaryVelocity ?? 0).abs() > 150) {
+          setState(() => _replyingTo = message);
+        }
+      },
+      child: Align(
+        alignment: message.isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: message.isMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(bottom: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.76,
+              ),
+              decoration: BoxDecoration(
+                gradient: message.isMe && !isSticker
+                    ? LinearGradient(
+                        colors: _theme.myBubbleGradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: isSticker
+                    ? Colors.transparent
+                    : message.isMe
+                    ? null
+                    : _theme.partnerBubbleColor,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(message.isMe ? 16 : 4),
+                  topRight: Radius.circular(message.isMe ? 4 : 16),
+                  bottomLeft: const Radius.circular(16),
+                  bottomRight: const Radius.circular(16),
+                ),
+                boxShadow: isSticker
+                    ? []
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  if (message.replyToText != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border(
+                          left: BorderSide(color: _theme.accentColor, width: 3),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            message.replyToIsMe ? 'You' : 'Partner',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: _theme.accentColor,
+                            ),
+                          ),
+                          Text(
+                            message.replyToText!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (message.callType != null)
+                    InkWell(
+                      onTap: () => _showCallOptions(
+                        isVideo: message.callType == 'video',
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            CircleAvatar(
+                              backgroundColor: Colors.black.withValues(
+                                alpha: 0.04,
+                              ),
+                              child: Icon(
+                                message.callType == 'video'
+                                    ? Icons.videocam
+                                    : Icons.call,
+                                color: message.callSeconds == null
+                                    ? Colors.red
+                                    : chatGreen,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    callText?.title ?? '',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  Text(
+                                    callText?.detail ?? '',
+                                    style: const TextStyle(
+                                      color: Colors.black54,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (message.imageUrl != null)
+                    GestureDetector(
+                      onTap: () => _openFullScreenImage(message.imageUrl!),
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: CachedChatImage(
+                            imageUrl: message.imageUrl!,
+                            width: 220,
+                            height: 220,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (message.encryptedAudioData != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 6),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            onTap: () => _togglePlayVoiceNote(message),
+                            child: CircleAvatar(
+                              radius: 16,
+                              backgroundColor: Colors.black12,
+                              child: Icon(
+                                isPlayingVoice ? Icons.stop : Icons.play_arrow,
+                                color: chatInk,
+                                size: 20,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            isPlayingVoice
+                                ? 'Playing encrypted audio...'
+                                : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
+                            style: const TextStyle(
+                              color: chatInk,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else if (isSticker)
+                    StickerArt(
+                      emoji: message.text!.substring('sticker:v1:'.length),
+                      size: 136,
+                    )
+                  else if (message.text != null && message.text!.isNotEmpty)
+                    Text(
+                      isSticker
+                          ? message.text!.substring('sticker:v1:'.length)
+                          : message.text!,
+                      style: TextStyle(
+                        color: chatInk,
+                        fontSize: isSticker ? 68 : 16,
+                        height: 1.3,
+                      ),
+                    ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (message.expiresAtMs != null) ...[
+                        const Icon(
+                          Icons.timer_outlined,
+                          size: 11,
+                          color: Colors.orangeAccent,
+                        ),
+                        const SizedBox(width: 3),
+                      ],
+                      Text(
+                        '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
+                        style: const TextStyle(
+                          color: Colors.black54,
+                          fontSize: 10,
+                        ),
+                      ),
+                      if (message.isMe) ...[
+                        const SizedBox(width: 4),
+                        Icon(
+                          message.isSeen ? Icons.done_all : Icons.check,
+                          size: 14,
+                          color: message.isSeen ? Colors.blue : Colors.black54,
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (uniqueReactions.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6, left: 6, right: 6),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: _theme.appBarColor,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _theme.accentColor.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: Text(
+                    '${uniqueReactions.join(' ')} ${message.reactions.length > 1 ? message.reactions.length : ''}'
+                        .trim(),
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
 
+    if (!isArriving) return bubble;
     return SizeTransition(
       sizeFactor: CurvedAnimation(
-        parent: animController,
-        curve: Curves.easeOutBack,
+        parent: _messageAnimController,
+        curve: Curves.easeOutCubic,
       ),
       axis: Axis.vertical,
       child: FadeTransition(
-        opacity: CurvedAnimation(parent: animController, curve: Curves.easeOut),
-        child: GestureDetector(
-          onLongPress: () => _showMessageActions(message),
-          onHorizontalDragEnd: (details) {
-            if ((details.primaryVelocity ?? 0).abs() > 150) {
-              setState(() => _replyingTo = message);
-            }
-          },
-          child: Align(
-            alignment: message.isMe
-                ? Alignment.centerRight
-                : Alignment.centerLeft,
-            child: Column(
-              crossAxisAlignment: message.isMe
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
-              children: [
-                Container(
-                  margin: const EdgeInsets.only(bottom: 4),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  constraints: BoxConstraints(
-                    maxWidth: MediaQuery.of(context).size.width * 0.76,
-                  ),
-                  decoration: BoxDecoration(
-                    gradient: message.isMe && !isSticker
-                        ? LinearGradient(
-                            colors: _theme.myBubbleGradient,
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : null,
-                    color: isSticker
-                        ? Colors.transparent
-                        : message.isMe
-                        ? null
-                        : _theme.partnerBubbleColor,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(message.isMe ? 16 : 4),
-                      topRight: Radius.circular(message.isMe ? 4 : 16),
-                      bottomLeft: const Radius.circular(16),
-                      bottomRight: const Radius.circular(16),
-                    ),
-                    boxShadow: isSticker
-                        ? []
-                        : [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              blurRadius: 4,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      if (message.replyToText != null)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.05),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border(
-                              left: BorderSide(
-                                color: _theme.accentColor,
-                                width: 3,
-                              ),
-                            ),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                message.replyToIsMe ? 'You' : 'Partner',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                  color: _theme.accentColor,
-                                ),
-                              ),
-                              Text(
-                                message.replyToText!,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: Colors.black54,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      if (message.callType != null)
-                        InkWell(
-                          onTap: () => _showCallOptions(
-                            isVideo: message.callType == 'video',
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor: Colors.black.withValues(
-                                    alpha: 0.04,
-                                  ),
-                                  child: Icon(
-                                    message.callType == 'video'
-                                        ? Icons.videocam
-                                        : Icons.call,
-                                    color: message.callSeconds == null
-                                        ? Colors.red
-                                        : chatGreen,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Flexible(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        callText?.title ?? '',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                      Text(
-                                        callText?.detail ?? '',
-                                        style: const TextStyle(
-                                          color: Colors.black54,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        )
-                      else if (message.imageUrl != null)
-                        GestureDetector(
-                          onTap: () => _openFullScreenImage(message.imageUrl!),
-                          child: Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: CachedChatImage(
-                                imageUrl: message.imageUrl!,
-                                width: 220,
-                                height: 220,
-                              ),
-                            ),
-                          ),
-                        ),
-                      if (message.encryptedAudioData != null)
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.22),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              InkWell(
-                                onTap: () => _togglePlayVoiceNote(message),
-                                child: CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: Colors.black12,
-                                  child: Icon(
-                                    isPlayingVoice
-                                        ? Icons.stop
-                                        : Icons.play_arrow,
-                                    color: chatInk,
-                                    size: 20,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Text(
-                                isPlayingVoice
-                                    ? 'Playing encrypted audio...'
-                                    : 'Voice Note (${message.audioDurationSeconds ?? 1}s)',
-                                style: const TextStyle(
-                                  color: chatInk,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        )
-                      else if (isSticker)
-                        StickerArt(
-                          emoji: message.text!.substring('sticker:v1:'.length),
-                          size: 136,
-                        )
-                      else if (message.text != null && message.text!.isNotEmpty)
-                        Text(
-                          isSticker
-                              ? message.text!.substring('sticker:v1:'.length)
-                              : message.text!,
-                          style: TextStyle(
-                            color: chatInk,
-                            fontSize: isSticker ? 68 : 16,
-                            height: 1.3,
-                          ),
-                        ),
-                      const SizedBox(height: 4),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (message.expiresAtMs != null) ...[
-                            const Icon(
-                              Icons.timer_outlined,
-                              size: 11,
-                              color: Colors.orangeAccent,
-                            ),
-                            const SizedBox(width: 3),
-                          ],
-                          Text(
-                            '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
-                            style: const TextStyle(
-                              color: Colors.black54,
-                              fontSize: 10,
-                            ),
-                          ),
-                          if (message.isMe) ...[
-                            const SizedBox(width: 4),
-                            Icon(
-                              message.isSeen ? Icons.done_all : Icons.check,
-                              size: 14,
-                              color: message.isSeen
-                                  ? Colors.blue
-                                  : Colors.black54,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                if (uniqueReactions.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      bottom: 6,
-                      left: 6,
-                      right: 6,
-                    ),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: _theme.appBarColor,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: _theme.accentColor.withValues(alpha: 0.4),
-                        ),
-                      ),
-                      child: Text(
-                        '${uniqueReactions.join(' ')} ${message.reactions.length > 1 ? message.reactions.length : ''}'
-                            .trim(),
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
+        opacity: CurvedAnimation(
+          parent: _messageAnimController,
+          curve: Curves.easeOut,
+        ),
+        child: bubble,
+      ),
+    );
+  }
+}
+
+/// Three dots that ripple in the header while the partner is typing — the
+/// status line's version of the same activity the composer reports.
+class _TypingDots extends StatefulWidget {
+  const _TypingDots();
+
+  @override
+  State<_TypingDots> createState() => _TypingDotsState();
+}
+
+class _TypingDotsState extends State<_TypingDots>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 14,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) => Row(
+          mainAxisSize: MainAxisSize.min,
+          children: List.generate(3, (i) {
+            final phase = (_controller.value + i / 3) % 1.0;
+            final t = phase < 0.5 ? phase * 2 : (1 - phase) * 2;
+            return Container(
+              margin: EdgeInsets.only(right: i == 2 ? 0 : 3),
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.amberAccent.withValues(alpha: 0.35 + 0.65 * t),
+              ),
+            );
+          }),
         ),
       ),
     );
