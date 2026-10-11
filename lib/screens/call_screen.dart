@@ -40,6 +40,24 @@ class _CallScreenState extends State<CallScreen> {
   /// forever.
   static const Duration ringTimeout = Duration(seconds: 45);
 
+  /// 720p@30 capture target. Android already defaults to 1280x720, but the
+  /// native parsers take plain numbers (their `ideal`-map handling is
+  /// broken) and fall back to the closest camera format, so this pins the
+  /// same crisp capture on platforms whose default is lower.
+  static const Map<String, dynamic> _videoConstraints = {
+    'facingMode': 'user',
+    'width': 1280,
+    'height': 720,
+    'frameRate': 30,
+  };
+
+  /// Encoder profile for call video: give 720p room to breathe (2.5 Mbps
+  /// ceiling), keep a modest floor so the picture never collapses to a blur
+  /// on a slow link, and when the network dips, drop frames before letting
+  /// the resolution smear.
+  static const int _maxVideoBitrateBps = 2500000;
+  static const int _minVideoBitrateBps = 250000;
+
   StreamSubscription<DatabaseEvent>? _callSub;
   Timer? _durationTimer;
   Timer? _ringTimer;
@@ -108,7 +126,7 @@ class _CallScreenState extends State<CallScreen> {
     if (_localStream != null) return;
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
-      'video': widget.isVideo ? {'facingMode': 'user'} : false,
+      'video': widget.isVideo ? _videoConstraints : false,
     });
     await _localRenderer.initialize();
     _localRenderer.srcObject = _localStream;
@@ -148,6 +166,34 @@ class _CallScreenState extends State<CallScreen> {
       }
     };
     await _applySpeaker();
+    await _applySendQuality();
+  }
+
+  /// Applies the encoder profile to the outgoing tracks. Best-effort: a
+  /// platform that rejects a parameter must never block the call itself.
+  Future<void> _applySendQuality() async {
+    try {
+      final pc = _pc;
+      if (pc == null) return;
+      final senders = await pc.getSenders();
+      for (final sender in senders) {
+        final track = sender.track;
+        if (track == null || track.kind != 'video') continue;
+        final params = sender.parameters;
+        params.degradationPreference =
+            RTCDegradationPreference.MAINTAIN_RESOLUTION;
+        for (final encoding in params.encodings ?? const <RTCRtpEncoding>[]) {
+          encoding.maxBitrate = _maxVideoBitrateBps;
+          encoding.minBitrate = _minVideoBitrateBps;
+          encoding.maxFramerate = 30;
+          encoding.scaleResolutionDownBy = 1.0;
+          encoding.priority = RTCPriorityType.high;
+        }
+        await sender.setParameters(params);
+      }
+    } catch (_) {
+      // Quality hints are best-effort.
+    }
   }
 
   Future<void> _writeOffer() async {
