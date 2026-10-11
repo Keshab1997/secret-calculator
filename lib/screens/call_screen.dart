@@ -35,8 +35,14 @@ class _CallScreenState extends State<CallScreen> {
     'sdpSemantics': 'unified-plan',
   };
 
+  /// How long a call may ring before it is logged as missed and closed on
+  /// both sides — an offline callee must not leave the caller "Ringing…"
+  /// forever.
+  static const Duration ringTimeout = Duration(seconds: 45);
+
   StreamSubscription<DatabaseEvent>? _callSub;
   Timer? _durationTimer;
+  Timer? _ringTimer;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -71,6 +77,7 @@ class _CallScreenState extends State<CallScreen> {
     // The incoming screen is only pushed while the call node exists, so a
     // null snapshot right away means the caller already cancelled.
     _hasSeenCallNode = widget.isIncoming;
+    _startRingTimer();
     _initCall();
   }
 
@@ -85,6 +92,10 @@ class _CallScreenState extends State<CallScreen> {
         // (it replaces the whole call node), then the offer signal.
         await _setupLocalMedia();
         await _firebase.startCall(isVideo: widget.isVideo);
+        // The node exists from here on — if the callee rejects before our
+        // first stream event, the null snapshot must still close this screen
+        // instead of leaving it on "Ringing…" forever.
+        _hasSeenCallNode = true;
         await _writeOffer();
       }
       _listenToCallState();
@@ -163,6 +174,7 @@ class _CallScreenState extends State<CallScreen> {
 
       final newStatus = raw['status']?.toString() ?? 'ringing';
       if (newStatus == 'connected' && _callStatus != 'connected') {
+        _ringTimer?.cancel();
         _startDurationTimer();
       }
       if (mounted && newStatus != _callStatus) {
@@ -280,9 +292,17 @@ class _CallScreenState extends State<CallScreen> {
     }
   }
 
+  /// How a user-initiated hangup is logged: a connected call completed; the
+  /// caller cancelling while ringing leaves the callee a missed call; the
+  /// callee hanging up while ringing is a decline, shown as rejected on both
+  /// sides.
+  String get _hangupOutcome => _callStatus == 'connected'
+      ? 'completed'
+      : (_isCaller ? 'missed' : 'declined');
+
   Future<void> _endCall() async {
     try {
-      await _firebase.endCall();
+      await _firebase.endCall(outcome: _hangupOutcome);
     } catch (_) {}
     _closeCallScreen();
   }
@@ -291,7 +311,7 @@ class _CallScreenState extends State<CallScreen> {
     if (_disposed || _isClosing || !mounted) return;
     _isClosing = true;
     try {
-      await _firebase.endCall();
+      await _firebase.endCall(outcome: _hangupOutcome);
     } catch (_) {}
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -314,6 +334,21 @@ class _CallScreenState extends State<CallScreen> {
         _elapsedSeconds++;
       });
     });
+  }
+
+  void _startRingTimer() {
+    _ringTimer?.cancel();
+    _ringTimer = Timer(ringTimeout, _onRingTimeout);
+  }
+
+  /// Nobody accepted in time: log the call as missed (even if this side is
+  /// the callee — ringing out is not a decline) and close on both sides.
+  Future<void> _onRingTimeout() async {
+    if (_disposed || _isClosing || _callStatus == 'connected') return;
+    try {
+      await _firebase.endCall(outcome: 'missed');
+    } catch (_) {}
+    _closeCallScreen();
   }
 
   void _toggleMute() {
@@ -381,11 +416,12 @@ class _CallScreenState extends State<CallScreen> {
   void dispose() {
     _disposed = true;
     _durationTimer?.cancel();
+    _ringTimer?.cancel();
     _callSub?.cancel();
     _teardownWebRTC();
     _native.stopAudio();
     // Swiping back hangs up for everyone; a no-op if the node is already gone.
-    _firebase.endCall().catchError((_) {});
+    _firebase.endCall(outcome: _hangupOutcome).catchError((_) {});
     super.dispose();
   }
 

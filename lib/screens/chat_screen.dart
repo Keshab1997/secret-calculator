@@ -322,6 +322,7 @@ class _ChatScreenState extends State<ChatScreen>
             id: entry.key,
             callType: message['callType'] as String?,
             callSeconds: message['callSeconds'] as int?,
+            callOutcome: message['callOutcome'] as String?,
             text: _safeDecrypt(message['text'], cacheKey: '${entry.key}:t'),
             imageUrl: message['imageUrl'] as String?,
             encryptedAudioData: message['audioData'] as String?,
@@ -1852,6 +1853,14 @@ class _ChatScreenState extends State<ChatScreen>
     final isSticker = message.text?.startsWith('sticker:v1:') ?? false;
     final uniqueReactions = message.reactions.values.toSet().toList();
     final isPlayingVoice = _playingMessageId == message.id;
+    final callText = message.callType == null
+        ? null
+        : callLogText(
+            callType: message.callType,
+            callSeconds: message.callSeconds,
+            callOutcome: message.callOutcome,
+            isMe: message.isMe,
+          );
 
     // Create a simple slide+fade animation for new messages
     final animController = _messageAnimController;
@@ -1991,18 +2000,14 @@ class _ChatScreenState extends State<ChatScreen>
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        '${message.callSeconds == null && !message.isMe ? 'Missed ' : ''}${message.callType == 'video' ? 'Video' : 'Voice'} call',
+                                        callText?.title ?? '',
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w600,
                                           fontSize: 16,
                                         ),
                                       ),
                                       Text(
-                                        message.callSeconds == null
-                                            ? (message.isMe
-                                                  ? 'No answer'
-                                                  : 'Tap to call back')
-                                            : '${message.callSeconds} secs',
+                                        callText?.detail ?? '',
                                         style: const TextStyle(
                                           color: Colors.black54,
                                         ),
@@ -2160,6 +2165,7 @@ class ChatMessage {
   final String id;
   final String? callType;
   final int? callSeconds;
+  final String? callOutcome;
   final String? text;
   final String? imageUrl;
   final String? encryptedAudioData;
@@ -2176,6 +2182,7 @@ class ChatMessage {
     required this.id,
     this.callType,
     this.callSeconds,
+    this.callOutcome,
     this.text,
     this.imageUrl,
     this.encryptedAudioData,

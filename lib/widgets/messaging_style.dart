@@ -22,6 +22,45 @@ MaterialPageRoute<T> messagingRoute<T>(Widget child) => MaterialPageRoute<T>(
   builder: (_) => Theme(data: messagingTheme, child: child),
 );
 
+/// Formats a call duration as `m:ss` (0:00 … 12:34).
+String formatCallDuration(int totalSeconds) {
+  final safe = totalSeconds < 0 ? 0 : totalSeconds;
+  final minutes = safe ~/ 60;
+  final seconds = safe % 60;
+  return '$minutes:${seconds.toString().padLeft(2, '0')}';
+}
+
+/// WhatsApp-style call log text for one call entry, resolved per viewer.
+///
+/// [callOutcome] is 'completed', 'missed' (nobody accepted — ring timeout,
+/// offline callee, or the caller cancelled) or 'declined' (the callee
+/// rejected). Entries from older clients predate the field: there a null
+/// [callSeconds] meant the call never connected.
+({String title, String detail}) callLogText({
+  required String? callType,
+  required int? callSeconds,
+  required String? callOutcome,
+  required bool isMe,
+}) {
+  final kind = callType == 'video' ? 'Video' : 'Voice';
+  final outcome =
+      callOutcome ?? (callSeconds == null ? 'missed' : 'completed');
+  switch (outcome) {
+    case 'declined':
+      return (title: 'Declined $kind call', detail: 'Tap to call back');
+    case 'missed':
+      return isMe
+          ? (title: '$kind call', detail: 'No answer')
+          : (title: 'Missed $kind call', detail: 'Tap to call back');
+    case 'completed':
+    default:
+      return (
+        title: '$kind call',
+        detail: callSeconds == null ? '' : formatCallDuration(callSeconds),
+      );
+  }
+}
+
 class ProfileAvatar extends StatelessWidget {
   final String? photo;
   final double radius;

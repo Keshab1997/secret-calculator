@@ -620,18 +620,30 @@ class FirebaseService {
     });
   }
 
-  /// Ends or declines the active call in the current room.
-  Future<void> endCall() async {
+  /// Ends or declines the active call in the current room and logs it in the
+  /// chat history.
+  ///
+  /// [outcome] describes how the call ended when it never connected:
+  /// 'missed' (nobody accepted — ring timeout, offline callee, or the caller
+  /// cancelled) or 'declined' (the callee rejected). A connected call always
+  /// logs as 'completed' with its duration.
+  Future<void> endCall({String outcome = 'completed'}) async {
     if (_roomId == null || Firebase.apps.isEmpty) return;
     final room = _db.ref('rooms/$_roomId');
     final snapshot = await room.child('call').get();
     final call = snapshot.value;
-    if (call is! Map || call['startedAt'] is! int) return;
+    if (call is! Map) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     final connected = call['connectedAt'] as int?;
+    // The node must always be cleared, even if the timestamp write is still
+    // pending — otherwise both sides are stuck on a ringing screen forever.
+    final startedRaw = call['startedAt'];
+    final startedKey = startedRaw is int ? startedRaw : now;
+    const validOutcomes = {'completed', 'missed', 'declined'};
+    final resolved = validOutcomes.contains(outcome) ? outcome : 'missed';
     await room.update({
       'call': null,
-      'messages/call_${call['startedAt']}': {
+      'messages/call_$startedKey': {
         'senderId': call['callerId'],
         'timestamp': now,
         'seen': false,
@@ -639,6 +651,7 @@ class FirebaseService {
         'callSeconds': connected == null
             ? null
             : max(0, (now - connected) ~/ 1000),
+        'callOutcome': connected == null ? resolved : 'completed',
       },
     });
   }

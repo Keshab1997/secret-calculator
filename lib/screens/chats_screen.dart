@@ -193,7 +193,12 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
 
   String _preview(String code, Map message) {
     if (message['callType'] != null) {
-      return '${message['callSeconds'] == null ? 'Unanswered ' : ''}${message['callType']} call';
+      return callLogText(
+        callType: message['callType'] as String?,
+        callSeconds: message['callSeconds'] as int?,
+        callOutcome: message['callOutcome'] as String?,
+        isMe: message['senderId'] == _service.peerId,
+      ).title;
     }
     if (message['imageUrl'] != null) return 'Photo';
     if (message['audioData'] != null) return 'Voice message';
