@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/romantic_message_effect.dart';
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
 import '../services/media_cache_service.dart';
@@ -17,6 +18,7 @@ import '../widgets/app_toast.dart';
 import '../widgets/emoji_keyboard.dart';
 import '../widgets/option_sheet.dart';
 import '../widgets/photo_upload_indicator.dart';
+import '../widgets/romantic_effect_overlay.dart';
 import '../widgets/sticker_keyboard.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/sticker_art.dart';
@@ -165,6 +167,8 @@ class _ChatScreenState extends State<ChatScreen>
   /// Id of the message that arrived most recently; only that bubble plays the
   /// entrance animation (see [_buildMessageBubble]).
   String? _freshMessageId;
+  RomanticMessageEffect? _activeRomanticEffect;
+  int _romanticEffectSequence = 0;
   bool _myReportedTyping = false;
   String _partnerLastSeen = '';
   bool _messagesPrimed = false;
@@ -354,7 +358,15 @@ class _ChatScreenState extends State<ChatScreen>
     _messagesSub?.cancel();
     _messagesSub = _firebase.getMessagesStream().listen((event) {
       final raw = event.snapshot.value;
-      if (raw == null || raw is! Map) {
+      if (raw == null) {
+        // A null initial snapshot represents an empty room, so the next
+        // message is genuinely new rather than chat history to replay.
+        _messagesPrimed = true;
+        if (!mounted) return;
+        setState(_messages.clear);
+        return;
+      }
+      if (raw is! Map) {
         if (!mounted) return;
         setState(_messages.clear);
         return;
@@ -377,6 +389,7 @@ class _ChatScreenState extends State<ChatScreen>
       final rebuilt = <ChatMessage>[];
       final unseenPartnerKeys = <String>[];
       String? newPartnerMessageId;
+      RomanticMessageEffect? newRomanticEffect;
 
       for (final entry in entries) {
         final message = entry.value;
@@ -440,8 +453,10 @@ class _ChatScreenState extends State<ChatScreen>
             message['text'] != null ||
             message['imageUrl'] != null ||
             message['audioData'] != null;
-        if (_messagesPrimed && isNewKey && !isMe && hasSmsContent) {
-          newPartnerMessageId = entry.key;
+        if (_messagesPrimed && isNewKey && hasSmsContent) {
+          final effect = romanticEffectForMessage(rebuilt.last.text);
+          if (effect != null) newRomanticEffect = effect;
+          if (!isMe) newPartnerMessageId = entry.key;
         }
       }
       _messagesPrimed = true;
@@ -458,6 +473,11 @@ class _ChatScreenState extends State<ChatScreen>
         _messages
           ..clear()
           ..addAll(rebuilt);
+        if (_lifecycleState == AppLifecycleState.resumed &&
+            newRomanticEffect != null) {
+          _activeRomanticEffect = newRomanticEffect;
+          _romanticEffectSequence++;
+        }
       });
 
       if (rebuilt.length > previousCount) {
@@ -1568,6 +1588,8 @@ class _ChatScreenState extends State<ChatScreen>
   Widget build(BuildContext context) {
     final displayedMessages = _filteredMessages;
     final hasTypedText = _messageController.text.trim().isNotEmpty;
+    final activeRomanticEffect = _activeRomanticEffect;
+    final romanticEffectSequence = _romanticEffectSequence;
 
     return PopScope(
       canPop: !_showEmojiPicker && !_showStickerKeyboard,
@@ -1718,85 +1740,106 @@ class _ChatScreenState extends State<ChatScreen>
               if (_searchQuery.trim().isNotEmpty)
                 _buildSearchBanner(displayedMessages.length),
               Expanded(
-                child: displayedMessages.isEmpty && _outgoing.isEmpty
-                    ? Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 88,
-                                height: 88,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: chatGreen.withValues(alpha: 0.08),
-                                ),
-                                child: Icon(
-                                  _searchQuery.isNotEmpty
-                                      ? Icons.search_off
-                                      : Icons.lock_outline,
-                                  size: 38,
-                                  color: chatGreen,
-                                ),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    displayedMessages.isEmpty && _outgoing.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(32),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 88,
+                                    height: 88,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: chatGreen.withValues(alpha: 0.08),
+                                    ),
+                                    child: Icon(
+                                      _searchQuery.isNotEmpty
+                                          ? Icons.search_off
+                                          : Icons.lock_outline,
+                                      size: 38,
+                                      color: chatGreen,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 20),
+                                  Text(
+                                    _searchQuery.isNotEmpty
+                                        ? 'No matching messages found'
+                                        : 'Start a secret conversation',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Only your paired conversation appears here',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: 13.5,
+                                      height: 1.35,
+                                      color: _sub,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 20),
-                              Text(
-                                _searchQuery.isNotEmpty
-                                    ? 'No matching messages found'
-                                    : 'Start a secret conversation',
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Only your paired conversation appears here',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(
-                                  fontSize: 13.5,
-                                  height: 1.35,
-                                  color: _sub,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
-                        ),
-                        itemCount: displayedMessages.length + _outgoing.length,
-                        itemBuilder: (context, index) {
-                          if (index >= displayedMessages.length) {
-                            return _buildPendingBubble(
-                              _outgoing[index - displayedMessages.length],
-                            );
-                          }
-                          final message = displayedMessages[index];
-                          final prevMessage = index > 0
-                              ? displayedMessages[index - 1]
-                              : null;
-                          final showDateHeader =
-                              prevMessage == null ||
-                              !_isSameDay(
-                                prevMessage.timestamp,
-                                message.timestamp,
+                            ),
+                          )
+                        : ListView.builder(
+                            controller: _scrollController,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            itemCount:
+                                displayedMessages.length + _outgoing.length,
+                            itemBuilder: (context, index) {
+                              if (index >= displayedMessages.length) {
+                                return _buildPendingBubble(
+                                  _outgoing[index - displayedMessages.length],
+                                );
+                              }
+                              final message = displayedMessages[index];
+                              final prevMessage = index > 0
+                                  ? displayedMessages[index - 1]
+                                  : null;
+                              final showDateHeader =
+                                  prevMessage == null ||
+                                  !_isSameDay(
+                                    prevMessage.timestamp,
+                                    message.timestamp,
+                                  );
+                              return Column(
+                                children: [
+                                  if (showDateHeader)
+                                    _buildDateSeparator(message.timestamp),
+                                  _buildMessageBubble(message),
+                                ],
                               );
-                          return Column(
-                            children: [
-                              if (showDateHeader)
-                                _buildDateSeparator(message.timestamp),
-                              _buildMessageBubble(message),
-                            ],
-                          );
-                        },
+                            },
+                          ),
+                    if (activeRomanticEffect != null)
+                      Positioned.fill(
+                        child: RomanticEffectOverlay(
+                          key: ValueKey(romanticEffectSequence),
+                          effect: activeRomanticEffect,
+                          onFinished: () {
+                            if (!mounted ||
+                                _romanticEffectSequence !=
+                                    romanticEffectSequence) {
+                              return;
+                            }
+                            setState(() => _activeRomanticEffect = null);
+                          },
+                        ),
                       ),
+                  ],
+                ),
               ),
               if (_replyingTo != null)
                 Container(
