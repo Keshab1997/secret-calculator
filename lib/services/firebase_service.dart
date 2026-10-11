@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'encryption_service.dart';
+import 'media_cache_service.dart';
 
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
@@ -55,6 +56,7 @@ class FirebaseService {
   final Map<String, ({String cipher, Map<String, String> profile})>
   _partnerProfileCache = {};
   String _customPasscode = defaultPasscode;
+  String? _decoyPasscode;
   bool _biometricEnabled = false;
   int? _disappearingSeconds;
   final EncryptionService _encryption = EncryptionService();
@@ -70,6 +72,9 @@ class FirebaseService {
 
   /// Current custom secret calculator passcode (4–8 digits).
   String get customPasscode => _customPasscode;
+
+  /// Optional decoy calculator passcode (4–8 digits) that opens an empty decoy view.
+  String? get decoyPasscode => _decoyPasscode;
 
   /// Whether fingerprint/biometric verification is required after entering the passcode.
   bool get biometricEnabled => _biometricEnabled;
@@ -175,6 +180,13 @@ class FirebaseService {
         if (savedPasscode is String && isValidPasscode(savedPasscode)) {
           _customPasscode = savedPasscode.trim();
         }
+        final savedDecoy = decoded['decoyPasscode'];
+        if (savedDecoy is String &&
+            isValidPasscode(savedDecoy) &&
+            savedDecoy.trim() != _customPasscode &&
+            savedDecoy.trim() != defaultPasscode) {
+          _decoyPasscode = savedDecoy.trim();
+        }
         final savedBio = decoded['biometricEnabled'];
         if (savedBio is bool) {
           _biometricEnabled = savedBio;
@@ -235,6 +247,7 @@ class FirebaseService {
           'peerId': _peerId,
           'roomId': _isPaired ? _roomId : null,
           'customPasscode': _customPasscode,
+          'decoyPasscode': _decoyPasscode,
           'biometricEnabled': _biometricEnabled,
           'disappearingSeconds': _disappearingSeconds,
         }),
@@ -250,6 +263,27 @@ class FirebaseService {
     final trimmed = code.trim();
     if (!isValidPasscode(trimmed)) return false;
     _customPasscode = trimmed;
+    if (_decoyPasscode == trimmed) {
+      _decoyPasscode = null;
+    }
+    await _saveState();
+    return true;
+  }
+
+  /// Sets or clears an optional decoy passcode (4–8 digits, distinct from real unlock code).
+  Future<bool> setDecoyPasscode(String? code) async {
+    final trimmed = code?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      _decoyPasscode = null;
+      await _saveState();
+      return true;
+    }
+    if (!isValidPasscode(trimmed) ||
+        trimmed == _customPasscode ||
+        trimmed == defaultPasscode) {
+      return false;
+    }
+    _decoyPasscode = trimmed;
     await _saveState();
     return true;
   }
@@ -662,18 +696,50 @@ class FirebaseService {
     }
   }
 
-  /// Deletes a single message from the room for everyone.
-  Future<void> deleteMessage(String messageKey) async {
-    final chatRef = _ensureChatRef();
-    if (chatRef == null) return;
-    await chatRef.child(messageKey).remove();
+  Future<void> _deleteStorageUrlBestEffort(Object? rawUrl) async {
+    if (rawUrl is! String || rawUrl.isEmpty || Firebase.apps.isEmpty) return;
+    try {
+      await FirebaseStorage.instance.refFromURL(rawUrl).delete();
+    } catch (_) {}
   }
 
-  /// Clears all messages in the current room.
+  /// Deletes a single message from the room for everyone and removes any cloud image.
+  Future<void> deleteMessage(String messageKey, {String? imageUrl}) async {
+    final chatRef = _ensureChatRef();
+    if (chatRef == null) return;
+    var urlToDelete = imageUrl;
+    if (urlToDelete == null) {
+      try {
+        final snap = await chatRef.child(messageKey).child('imageUrl').get();
+        if (snap.value is String) {
+          urlToDelete = snap.value as String;
+        }
+      } catch (_) {}
+    }
+    await chatRef.child(messageKey).remove();
+    await _deleteStorageUrlBestEffort(urlToDelete);
+  }
+
+  /// Clears all messages in the current room and cleans up cloud images.
   Future<void> clearAllMessages() async {
     final chatRef = _ensureChatRef();
     if (chatRef == null) return;
+    final urls = <String>[];
+    try {
+      final snap = await chatRef.get();
+      final raw = snap.value;
+      if (raw is Map) {
+        for (final entry in raw.values) {
+          if (entry is Map && entry['imageUrl'] is String) {
+            urls.add(entry['imageUrl'] as String);
+          }
+        }
+      }
+    } catch (_) {}
     await chatRef.remove();
+    for (final url in urls) {
+      await _deleteStorageUrlBestEffort(url);
+    }
   }
 
   // Listen for messages (bounded to recent 150 to keep Firebase bandwidth low).
@@ -696,7 +762,9 @@ class FirebaseService {
       // putFile without metadata may send none (depends on platform file
       // extension guessing) — which the rule would reject.
       await ref.putFile(imageFile, SettableMetadata(contentType: 'image/jpeg'));
-      return await ref.getDownloadURL();
+      final downloadUrl = await ref.getDownloadURL();
+      await MediaCacheService().seedCachedImage(downloadUrl, imageFile);
+      return downloadUrl;
     } catch (e) {
       // Surfaced in `flutter run` console so upload failures are diagnosable
       // instead of silently returning null.

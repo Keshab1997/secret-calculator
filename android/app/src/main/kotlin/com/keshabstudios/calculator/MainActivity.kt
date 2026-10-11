@@ -7,6 +7,7 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.os.Build
+import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -47,6 +48,15 @@ class MainActivity : FlutterFragmentActivity() {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         @Suppress("DEPRECATION")
                         audioManager.isSpeakerphoneOn = enabled
+                        result.success(true)
+                    }
+                    "setSecureScreen" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        if (enabled) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
                         result.success(true)
                     }
                     else -> result.notImplemented()

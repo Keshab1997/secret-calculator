@@ -16,6 +16,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _service = FirebaseService();
   late final TextEditingController _name;
   late final TextEditingController _about;
+  late final TextEditingController _decoyCode;
   String? _photo;
   String? _error;
   bool _saving = false;
@@ -24,6 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     super.initState();
     _name = TextEditingController(text: _service.profile['name']);
     _about = TextEditingController(text: _service.profile['about']);
+    _decoyCode = TextEditingController(text: _service.decoyPasscode ?? '');
     _photo = _service.profile['photo'];
   }
 
@@ -31,6 +33,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _name.dispose();
     _about.dispose();
+    _decoyCode.dispose();
     super.dispose();
   }
 
@@ -64,6 +67,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _error = null;
     });
     try {
+      final decoy = _decoyCode.text.trim();
+      final decoyOk = await _service.setDecoyPasscode(decoy);
+      if (!decoyOk) {
+        if (mounted) {
+          setState(
+            () => _error = 'Decoy code must be 4–8 digits and different from your unlock code.',
+          );
+        }
+        return;
+      }
       await _service.saveProfile({
         'name': _name.text,
         'about': _about.text,
@@ -131,6 +144,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
           decoration: const InputDecoration(
             labelText: 'About',
             prefixIcon: Icon(Icons.info_outline),
+          ),
+        ),
+        const SizedBox(height: 20),
+        TextField(
+          controller: _decoyCode,
+          enabled: !_saving,
+          maxLength: 8,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Decoy passcode (optional, 4–8 digits)',
+            helperText:
+                'Opens an empty chat list if someone forces you to unlock',
+            prefixIcon: Icon(Icons.shield_outlined),
           ),
         ),
         const SizedBox(height: 16),

@@ -75,6 +75,80 @@ class MediaCacheService {
     }
   }
 
+  static const int _maxDiskCacheBytes = 50 * 1024 * 1024;
+
+  /// Pre-seeds the local disk cache with [sourceFile] under [url] so the
+  /// sender never re-downloads their own uploaded photo from Firebase Storage.
+  Future<void> seedCachedImage(String url, File sourceFile) async {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty || !sourceFile.existsSync()) return;
+    try {
+      final dir = await _cacheDir();
+      final hash = _stableHash(trimmed);
+      final target = File('${dir.path}/img_$hash.jpg');
+      if (sourceFile.path != target.path) {
+        await sourceFile.copy(target.path);
+      }
+      _resolvedFileCache[trimmed] = target;
+      await pruneDiskCacheIfNeeded();
+    } catch (_) {}
+  }
+
+  /// Returns a cached `.m4a` file for a decrypted voice note, writing it once.
+  Future<File?> getOrCacheVoiceNote(
+    String cacheKey,
+    List<int> audioBytes,
+  ) async {
+    if (audioBytes.isEmpty) return null;
+    final key = 'voice_${_stableHash(cacheKey)}';
+    final mem = _resolvedFileCache[key];
+    if (mem != null && mem.existsSync() && mem.lengthSync() > 0) {
+      return mem;
+    }
+    try {
+      final dir = await _cacheDir();
+      final file = File('${dir.path}/$key.m4a');
+      if (!await file.exists() || await file.length() == 0) {
+        final tmp = File('${file.path}.tmp');
+        await tmp.writeAsBytes(audioBytes, flush: true);
+        await tmp.rename(file.path);
+        await pruneDiskCacheIfNeeded();
+      }
+      _resolvedFileCache[key] = file;
+      return file;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Prunes oldest cached media files when total cache exceeds 50 MB.
+  Future<void> pruneDiskCacheIfNeeded() async {
+    try {
+      final dir = await _cacheDir();
+      final entries = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => !f.path.endsWith('.tmp'))
+          .toList();
+      var total = 0;
+      final stats = <({File file, int size, DateTime modified})>[];
+      for (final file in entries) {
+        final stat = file.statSync();
+        total += stat.size;
+        stats.add((file: file, size: stat.size, modified: stat.modified));
+      }
+      if (total <= _maxDiskCacheBytes) return;
+      stats.sort((a, b) => a.modified.compareTo(b.modified));
+      for (final item in stats) {
+        if (total <= _maxDiskCacheBytes) break;
+        try {
+          item.file.deleteSync();
+          total -= item.size;
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
   /// Returns the local cached [File] for [url], downloading it once if needed.
   Future<File?> getOrDownloadImage(String url) {
     final trimmed = url.trim();
@@ -91,6 +165,9 @@ class MediaCacheService {
         if (await file.exists() && await file.length() > 0) {
           _resolvedFileCache[trimmed] = file;
           return file;
+        }
+        if (Platform.environment.containsKey('FLUTTER_TEST')) {
+          return null;
         }
         final uri = Uri.tryParse(trimmed);
         if (uri == null || (!uri.isScheme('http') && !uri.isScheme('https'))) {

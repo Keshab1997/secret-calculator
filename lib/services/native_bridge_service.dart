@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 
 import 'encryption_service.dart';
+import 'media_cache_service.dart';
 
 class NativeBridgeService {
   static final NativeBridgeService _instance = NativeBridgeService._internal();
@@ -67,11 +68,16 @@ class NativeBridgeService {
     try {
       final decryptedBase64 = encryption.decrypt(encryptedBase64Payload);
       final bytes = base64Decode(decryptedBase64);
-      final tempFile = File(
-        '${Directory.systemTemp.path}/voice_play_${DateTime.now().millisecondsSinceEpoch}.m4a',
+      final cached = await MediaCacheService().getOrCacheVoiceNote(
+        encryptedBase64Payload,
+        bytes,
       );
-      await tempFile.writeAsBytes(bytes, flush: true);
-      await playAudioFile(tempFile.path);
+      final targetFile =
+          cached ??
+          (await File(
+            '${Directory.systemTemp.path}/voice_play_${DateTime.now().millisecondsSinceEpoch}.m4a',
+          ).writeAsBytes(bytes, flush: true));
+      await playAudioFile(targetFile.path);
       return true;
     } catch (_) {
       return false;
@@ -95,6 +101,20 @@ class NativeBridgeService {
       });
     } on MissingPluginException {
       // No-op in tests.
+    } on PlatformException {
+      // Ignore.
+    }
+  }
+
+  /// Toggles Android `FLAG_SECURE` so secret chat screens are hidden from
+  /// Recent Apps thumbnails, screenshots, and screen recordings.
+  Future<void> setSecureScreen(bool enabled) async {
+    try {
+      await _channel.invokeMethod<bool>('setSecureScreen', {
+        'enabled': enabled,
+      });
+    } on MissingPluginException {
+      // No-op in tests or unsupported platforms.
     } on PlatformException {
       // Ignore.
     }

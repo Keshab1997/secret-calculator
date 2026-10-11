@@ -12,12 +12,13 @@ import 'pairing_screen.dart';
 import 'profile_screen.dart';
 
 class ChatsScreen extends StatefulWidget {
-  const ChatsScreen({super.key});
+  final bool decoyMode;
+  const ChatsScreen({super.key, this.decoyMode = false});
   @override
   State<ChatsScreen> createState() => _ChatsScreenState();
 }
 
-class _ChatsScreenState extends State<ChatsScreen> {
+class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
   final _service = FirebaseService();
   final Map<String, StreamSubscription<DatabaseEvent>> _subscriptions = {};
   final Map<String, Map> _rooms = {};
@@ -29,7 +30,17 @@ class _ChatsScreenState extends State<ChatsScreen> {
   @override
   void initState() {
     super.initState();
-    _subscribe();
+    WidgetsBinding.instance.addObserver(this);
+    if (!widget.decoyMode) {
+      _subscribe();
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused && !_opening && mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+    }
   }
 
   void _subscribe() {
@@ -76,6 +87,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     for (final sub in _subscriptions.values) {
       sub.cancel();
     }
@@ -392,7 +404,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
                 ),
               ],
             ),
-      floatingActionButton: _tab == 0
+      floatingActionButton: _tab == 0 && !widget.decoyMode
           ? FloatingActionButton(
               backgroundColor: chatGreen,
               foregroundColor: Colors.white,

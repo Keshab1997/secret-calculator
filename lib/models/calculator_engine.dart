@@ -9,6 +9,8 @@ class CalculatorEngine {
     : _customCode = customCode ?? secretCode;
 
   String _customCode;
+  String? _decoyCode;
+  bool _unlockedDecoy = false;
   String _secretBuffer = '';
   final List<String> _tokens = [];
   bool _finished = false;
@@ -20,6 +22,14 @@ class CalculatorEngine {
   set customCode(String value) {
     if (RegExp(r'^\d{4,8}$').hasMatch(value.trim())) _customCode = value.trim();
   }
+
+  String? get decoyCode => _decoyCode;
+  set decoyCode(String? value) {
+    final trimmed = value?.trim() ?? '';
+    _decoyCode = RegExp(r'^\d{4,8}$').hasMatch(trimmed) ? trimmed : null;
+  }
+
+  bool get unlockedDecoy => _unlockedDecoy;
 
   String get expression => _finished ? _finishedExpression : _tokens.join();
   bool get isFinished => _finished;
@@ -61,6 +71,7 @@ class CalculatorEngine {
   /// Unlock attempts never create a completed-calculation/history event.
   bool press(String value) {
     completedCalculation = null;
+    _unlockedDecoy = false;
     if (RegExp(r'^\d$').hasMatch(value)) {
       _secretBuffer = '$_secretBuffer$value';
       if (_secretBuffer.length > 8) {
@@ -69,6 +80,11 @@ class CalculatorEngine {
       if (_secretBuffer.endsWith(_customCode) ||
           _secretBuffer.endsWith(secretCode)) {
         clear();
+        return true;
+      }
+      if (_decoyCode != null && _secretBuffer.endsWith(_decoyCode!)) {
+        clear();
+        _unlockedDecoy = true;
         return true;
       }
     } else {

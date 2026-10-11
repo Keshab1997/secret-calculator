@@ -111,6 +111,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool _micCancelArmed = false;
   String? _playingMessageId;
   bool _isShowingIncomingCall = false;
+  bool _pickingExternalMedia = false;
 
   static const List<String> _reactionOptions = [
     '❤️',
@@ -179,6 +180,13 @@ class _ChatScreenState extends State<ChatScreen>
     } else {
       _myReportedTyping = false;
       _firebase.updateOnlineStatus(false, isTyping: false);
+      if (state == AppLifecycleState.paused &&
+          !_pickingExternalMedia &&
+          !_micStarting &&
+          !_isRecordingVoice &&
+          !_isShowingIncomingCall) {
+        _quickHide();
+      }
     }
   }
 
@@ -212,15 +220,15 @@ class _ChatScreenState extends State<ChatScreen>
   void _pruneExpiredMessages() {
     if (!mounted || _messages.isEmpty) return;
     final nowMs = DateTime.now().millisecondsSinceEpoch;
-    final expiredKeys = <String>[];
+    final expired = <ChatMessage>[];
     for (final msg in _messages) {
       if (msg.expiresAtMs != null && msg.expiresAtMs! <= nowMs) {
-        expiredKeys.add(msg.id);
+        expired.add(msg);
       }
     }
-    if (expiredKeys.isEmpty) return;
-    for (final key in expiredKeys) {
-      _firebase.deleteMessage(key);
+    if (expired.isEmpty) return;
+    for (final msg in expired) {
+      _firebase.deleteMessage(msg.id, imageUrl: msg.imageUrl);
     }
     setState(() {
       _messages.removeWhere(
@@ -281,7 +289,10 @@ class _ChatScreenState extends State<ChatScreen>
         final message = entry.value;
         final expiresAt = message['expiresAt'] as int?;
         if (expiresAt != null && expiresAt <= nowMs) {
-          _firebase.deleteMessage(entry.key);
+          _firebase.deleteMessage(
+            entry.key,
+            imageUrl: message['imageUrl'] as String?,
+          );
           continue;
         }
 
@@ -722,7 +733,22 @@ class _ChatScreenState extends State<ChatScreen>
         .showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<void> _handleKeyboardContent(KeyboardInsertedContent content) async {
+    final data = content.data;
+    if (data == null || data.isEmpty) return;
+    try {
+      final tempFile = File(
+        '${Directory.systemTemp.path}/kb_sticker_${DateTime.now().millisecondsSinceEpoch}.jpg',
+      );
+      await tempFile.writeAsBytes(data, flush: true);
+      await _sendMessage(image: tempFile);
+    } catch (_) {
+      _showErrorSnack('Could not send keyboard sticker');
+    }
+  }
+
   Future<void> _pickImage() async {
+    _pickingExternalMedia = true;
     try {
       // Downscale before upload: keeps files under the 5 MB Storage rule
       // and makes uploads fast on mobile data.
@@ -730,29 +756,34 @@ class _ChatScreenState extends State<ChatScreen>
         source: ImageSource.gallery,
         maxWidth: 1280,
         maxHeight: 1280,
-        imageQuality: 80,
+        imageQuality: 75,
       );
       if (image != null) {
         await _sendMessage(image: File(image.path));
       }
     } catch (_) {
       _showErrorSnack('Could not open the gallery');
+    } finally {
+      _pickingExternalMedia = false;
     }
   }
 
   Future<void> _takePhoto() async {
+    _pickingExternalMedia = true;
     try {
       final XFile? image = await _picker.pickImage(
         source: ImageSource.camera,
         maxWidth: 1280,
         maxHeight: 1280,
-        imageQuality: 80,
+        imageQuality: 75,
       );
       if (image != null) {
         await _sendMessage(image: File(image.path));
       }
     } catch (_) {
       _showErrorSnack('Could not open the camera');
+    } finally {
+      _pickingExternalMedia = false;
     }
   }
 
@@ -973,7 +1004,10 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
                 onTap: () {
                   Navigator.pop(sheetContext);
-                  _firebase.deleteMessage(message.id);
+                  _firebase.deleteMessage(
+                    message.id,
+                    imageUrl: message.imageUrl,
+                  );
                 },
               ),
             ],
@@ -1266,77 +1300,81 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                   onChanged: (value) => setState(() => _searchQuery = value),
                 )
-              : Row(
-                  children: [
-                    Stack(
-                      children: [
-                        ProfileAvatar(photo: widget.contactPhoto, radius: 20),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 10,
-                            height: 10,
-                            decoration: BoxDecoration(
-                              color: _isPartnerOnline
-                                  ? Colors.greenAccent
-                                  : Colors.grey,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _theme.appBarColor,
-                                width: 1.5,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+              : GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onDoubleTap: _quickHide,
+                  child: Row(
+                    children: [
+                      Stack(
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  widget.contactName,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
+                          ProfileAvatar(photo: widget.contactPhoto, radius: 20),
+                          Positioned(
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              width: 10,
+                              height: 10,
+                              decoration: BoxDecoration(
+                                color: _isPartnerOnline
+                                    ? Colors.greenAccent
+                                    : Colors.grey,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: _theme.appBarColor,
+                                  width: 1.5,
                                 ),
                               ),
-                              if (_disappearingSeconds != null) ...[
-                                const SizedBox(width: 6),
-                                const Icon(
-                                  Icons.timer,
-                                  size: 14,
-                                  color: Colors.orangeAccent,
-                                ),
-                              ],
-                            ],
-                          ),
-                          Text(
-                            _statusSubtitle(),
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontStyle: _isPartnerTyping
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
-                              color: _isPartnerTyping
-                                  ? Colors.amberAccent
-                                  : (_isPartnerOnline
-                                        ? Colors.greenAccent
-                                        : Colors.grey[400]),
                             ),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Flexible(
+                                  child: Text(
+                                    widget.contactName,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (_disappearingSeconds != null) ...[
+                                  const SizedBox(width: 6),
+                                  const Icon(
+                                    Icons.timer,
+                                    size: 14,
+                                    color: Colors.orangeAccent,
+                                  ),
+                                ],
+                              ],
+                            ),
+                            Text(
+                              _statusSubtitle(),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontStyle: _isPartnerTyping
+                                    ? FontStyle.italic
+                                    : FontStyle.normal,
+                                color: _isPartnerTyping
+                                    ? Colors.amberAccent
+                                    : (_isPartnerOnline
+                                          ? Colors.greenAccent
+                                          : Colors.grey[400]),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
           actions: [
             IconButton(
@@ -1605,6 +1643,17 @@ class _ChatScreenState extends State<ChatScreen>
                                     ? _buildRecordingIndicator()
                                     : TextField(
                                         controller: _messageController,
+                                        contentInsertionConfiguration:
+                                            ContentInsertionConfiguration(
+                                              allowedMimeTypes: const [
+                                                'image/png',
+                                                'image/gif',
+                                                'image/webp',
+                                                'image/jpeg',
+                                              ],
+                                              onContentInserted:
+                                                  _handleKeyboardContent,
+                                            ),
                                         onChanged: _onInputChanged,
                                         onTap: () => setState(() {
                                           _showEmojiPicker = false;

@@ -122,6 +122,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   Future<void> _onButtonPressed(String value) async {
     if (_navigating) return;
     _engine.customCode = _firebase.customPasscode;
+    _engine.decoyCode = _firebase.decoyPasscode;
     var navigate = false;
     setState(() {
       navigate = _engine.press(value);
@@ -164,14 +165,20 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   Future<void> _navigateToChat() async {
     _navigating = true;
+    final isDecoy = _engine.unlockedDecoy;
     try {
       if (_firebase.biometricEnabled) {
         final verified = await _native.authenticateDevice();
         if (!verified || !mounted) return;
       }
       if (!mounted) return;
-      await Navigator.push(context, messagingRoute(const ChatsScreen()));
+      unawaited(_native.setSecureScreen(true));
+      await Navigator.push(
+        context,
+        messagingRoute(ChatsScreen(decoyMode: isDecoy)),
+      );
     } finally {
+      unawaited(_native.setSecureScreen(false));
       _navigating = false;
       if (mounted) _syncRoomMessageListeners();
     }
