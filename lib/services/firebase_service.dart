@@ -633,10 +633,7 @@ class FirebaseService {
       // Explicit content type: storage.rules only allows `image/*`, and
       // putFile without metadata may send none (depends on platform file
       // extension guessing) — which the rule would reject.
-      await ref.putFile(
-        imageFile,
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
+      await ref.putFile(imageFile, SettableMetadata(contentType: 'image/jpeg'));
       return await ref.getDownloadURL();
     } catch (e) {
       // Surfaced in `flutter run` console so upload failures are diagnosable
