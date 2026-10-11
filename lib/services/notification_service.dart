@@ -1,5 +1,6 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 @pragma('vm:entry-point')
@@ -11,7 +12,9 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   } catch (_) {}
   if (message.notification == null && message.data.isNotEmpty) {
     await NotificationService().initialize(requestPermission: false);
-    await NotificationService().showFakeNotification();
+    await NotificationService().showFakeNotification(
+      messageId: message.data['messageId']?.toString(),
+    );
   }
 }
 
@@ -23,6 +26,15 @@ class NotificationService {
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
   bool _fcmListenersRegistered = false;
+  DateTime? _lastAlertAt;
+  String? _lastAlertMessageId;
+
+  /// Fixed notification ID so multiple SMS alerts replace the single banner
+  /// instead of stacking suspicious multiple notifications on the lock screen.
+  static const int disguisedNotificationId = 1997;
+
+  /// Minimum interval between disguised alerts to keep notifications subtle.
+  static const Duration minAlertCooldown = Duration(seconds: 25);
 
   // Fake notification messages that look like calculator notifications
   static const List<String> _fakeMessages = [
@@ -90,13 +102,47 @@ class NotificationService {
               sound: true,
             );
         FirebaseMessaging.onMessage.listen((message) {
-          showFakeNotification(customMessage: message.notification?.body);
+          final msgId = message.data['messageId']?.toString();
+          showFakeNotification(
+            customMessage: message.notification?.body,
+            messageId: msgId,
+          );
         });
       } catch (_) {}
     }
   }
 
-  Future<void> showFakeNotification({String? customMessage}) async {
+  @visibleForTesting
+  bool shouldAllowAlert({String? messageId, DateTime? now}) {
+    final current = now ?? DateTime.now();
+    if (messageId != null &&
+        messageId.isNotEmpty &&
+        _lastAlertMessageId == messageId) {
+      return false;
+    }
+    if (_lastAlertAt != null &&
+        current.difference(_lastAlertAt!) < minAlertCooldown) {
+      return false;
+    }
+    _lastAlertAt = current;
+    if (messageId != null && messageId.isNotEmpty) {
+      _lastAlertMessageId = messageId;
+    }
+    return true;
+  }
+
+  @visibleForTesting
+  void resetThrottleForTesting() {
+    _lastAlertAt = null;
+    _lastAlertMessageId = null;
+  }
+
+  Future<void> showFakeNotification({
+    String? customMessage,
+    String? messageId,
+  }) async {
+    if (!shouldAllowAlert(messageId: messageId)) return;
+
     final message =
         customMessage ??
         _fakeMessages[DateTime.now().millisecond % _fakeMessages.length];
@@ -107,6 +153,7 @@ class NotificationService {
       channelDescription: 'Calculator notifications',
       importance: Importance.high,
       priority: Priority.high,
+      onlyAlertOnce: true,
       showWhen: false,
       icon: '@mipmap/ic_launcher',
     );
@@ -125,7 +172,7 @@ class NotificationService {
     );
 
     await _notifications.show(
-      DateTime.now().millisecond,
+      disguisedNotificationId,
       'Calculator',
       message,
       details,

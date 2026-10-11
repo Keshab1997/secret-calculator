@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:calculator/services/encryption_service.dart';
 import 'package:calculator/services/firebase_service.dart';
+import 'package:calculator/services/media_cache_service.dart';
+import 'package:calculator/services/notification_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -104,6 +106,55 @@ void main() {
         isEmpty,
       );
       expect(service.partnerProfile('AB23CD', {'other': 'broken'}), isEmpty);
+    });
+  });
+
+  group('Media caching and discreet SMS notification throttling', () {
+    test('avatarProvider caches decoded base64 image instances in memory', () {
+      final cache = MediaCacheService();
+      // 1x1 transparent PNG in base64
+      const base64Png =
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+      final first = cache.avatarProvider(base64Png);
+      final second = cache.avatarProvider(base64Png);
+      expect(first, isNotNull);
+      expect(identical(first, second), isTrue);
+      expect(cache.avatarProvider(''), isNull);
+      expect(cache.avatarProvider('!!!not-base64!!!'), isNull);
+    });
+
+    test('shouldAllowAlert deduplicates messageId and enforces cooldown', () {
+      final notifications = NotificationService()..resetThrottleForTesting();
+      final t0 = DateTime(2026, 10, 11, 12, 0, 0);
+
+      expect(
+        notifications.shouldAllowAlert(messageId: 'msg-1', now: t0),
+        isTrue,
+      );
+      // Duplicate messageId is suppressed even after cooldown.
+      expect(
+        notifications.shouldAllowAlert(
+          messageId: 'msg-1',
+          now: t0.add(const Duration(minutes: 5)),
+        ),
+        isFalse,
+      );
+      // Burst message within 25s cooldown is suppressed for stealth.
+      expect(
+        notifications.shouldAllowAlert(
+          messageId: 'msg-2',
+          now: t0.add(const Duration(seconds: 10)),
+        ),
+        isFalse,
+      );
+      // Message after cooldown is allowed.
+      expect(
+        notifications.shouldAllowAlert(
+          messageId: 'msg-3',
+          now: t0.add(const Duration(seconds: 30)),
+        ),
+        isTrue,
+      );
     });
   });
 }

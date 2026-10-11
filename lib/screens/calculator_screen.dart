@@ -68,14 +68,13 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       _roomMessageSubs.putIfAbsent(code, () {
         var primed = false;
         final seen = _seenRoomMessageIds.putIfAbsent(code, () => <String>{});
-        return _firebase.roomStream(code).listen((event) {
-          final value = event.snapshot.value;
-          final messages = value is Map ? value['messages'] : null;
+        return _firebase.roomLatestMessageStream(code).listen((event) {
+          final messages = event.snapshot.value;
           if (messages is! Map) {
             primed = true;
             return;
           }
-          var hasIncoming = false;
+          String? incomingKey;
           for (final entry in messages.entries) {
             final key = entry.key.toString();
             final isNew = seen.add(key);
@@ -89,12 +88,12 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             if (hasBody &&
                 senderId.isNotEmpty &&
                 senderId != _firebase.peerId) {
-              hasIncoming = true;
+              incomingKey = key;
             }
           }
           primed = true;
-          if (hasIncoming && !_navigating) {
-            _notifications.showFakeNotification();
+          if (incomingKey != null && !_navigating) {
+            _notifications.showFakeNotification(messageId: incomingKey);
           }
         }, onError: (_) {});
       });

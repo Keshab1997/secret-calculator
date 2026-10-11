@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
+import '../services/media_cache_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/emoji_keyboard.dart';
@@ -92,7 +93,11 @@ class _ChatScreenState extends State<ChatScreen>
   String _searchQuery = '';
   bool _isPartnerOnline = false;
   bool _isPartnerTyping = false;
+  bool _myReportedTyping = false;
   String _partnerLastSeen = '';
+  bool _messagesPrimed = false;
+  AppLifecycleState _lifecycleState = AppLifecycleState.resumed;
+  final Map<String, ({String cipher, String? plain})> _decryptCache = {};
   int _selectedThemeIndex = 0;
   int? _disappearingSeconds;
   ChatMessage? _replyingTo;
@@ -168,9 +173,11 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _lifecycleState = state;
     if (state == AppLifecycleState.resumed) {
       _firebase.updateOnlineStatus(true);
     } else {
+      _myReportedTyping = false;
       _firebase.updateOnlineStatus(false, isTyping: false);
     }
   }
@@ -222,13 +229,24 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  String? _safeDecrypt(Object? rawValue) {
+  String? _safeDecrypt(Object? rawValue, {String? cacheKey}) {
     if (rawValue is! String || rawValue.isEmpty) return null;
-    try {
-      return _encryption.decrypt(rawValue);
-    } on FormatException {
-      return '[Unable to decrypt message]';
+    if (cacheKey != null) {
+      final cached = _decryptCache[cacheKey];
+      if (cached != null && cached.cipher == rawValue) {
+        return cached.plain;
+      }
     }
+    String? decoded;
+    try {
+      decoded = _encryption.decrypt(rawValue);
+    } on FormatException {
+      decoded = '[Unable to decrypt message]';
+    }
+    if (cacheKey != null) {
+      _decryptCache[cacheKey] = (cipher: rawValue, plain: decoded);
+    }
+    return decoded;
   }
 
   void _listenForMessages() {
@@ -257,7 +275,7 @@ class _ChatScreenState extends State<ChatScreen>
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       final rebuilt = <ChatMessage>[];
       final unseenPartnerKeys = <String>[];
-      var hasNewPartnerMessage = false;
+      String? newPartnerMessageId;
 
       for (final entry in entries) {
         final message = entry.value;
@@ -292,7 +310,7 @@ class _ChatScreenState extends State<ChatScreen>
             id: entry.key,
             callType: message['callType'] as String?,
             callSeconds: message['callSeconds'] as int?,
-            text: _safeDecrypt(message['text']),
+            text: _safeDecrypt(message['text'], cacheKey: '${entry.key}:t'),
             imageUrl: message['imageUrl'] as String?,
             encryptedAudioData: message['audioData'] as String?,
             audioDurationSeconds: message['audioDuration'] as int?,
@@ -301,7 +319,10 @@ class _ChatScreenState extends State<ChatScreen>
             timestamp: DateTime.fromMillisecondsSinceEpoch(
               (message['timestamp'] as int?) ?? 0,
             ),
-            replyToText: _safeDecrypt(message['replyToText']),
+            replyToText: _safeDecrypt(
+              message['replyToText'],
+              cacheKey: '${entry.key}:r',
+            ),
             replyToIsMe:
                 replySender != null && replySender == _firebase.myPeerId,
             reactions: reactions,
@@ -310,12 +331,18 @@ class _ChatScreenState extends State<ChatScreen>
         );
 
         final isNewKey = _seenMessageKeys.add(entry.key);
-        if (isNewKey && !isMe) {
-          hasNewPartnerMessage = true;
+        final hasSmsContent =
+            message['text'] != null ||
+            message['imageUrl'] != null ||
+            message['audioData'] != null;
+        if (_messagesPrimed && isNewKey && !isMe && hasSmsContent) {
+          newPartnerMessageId = entry.key;
         }
       }
+      _messagesPrimed = true;
 
-      if (unseenPartnerKeys.isNotEmpty) {
+      if (unseenPartnerKeys.isNotEmpty &&
+          _lifecycleState == AppLifecycleState.resumed) {
         _firebase.markMessagesSeen(unseenPartnerKeys);
       }
 
@@ -331,8 +358,11 @@ class _ChatScreenState extends State<ChatScreen>
         _scrollToBottom();
       }
 
-      if (hasNewPartnerMessage) {
-        _notifications.showFakeNotification();
+      // Only notify if the app is backgrounded while this chat stays mounted;
+      // when the user is actively reading this chat, notifications are noisy.
+      if (newPartnerMessageId != null &&
+          _lifecycleState != AppLifecycleState.resumed) {
+        _notifications.showFakeNotification(messageId: newPartnerMessageId);
       }
     });
   }
@@ -396,11 +426,20 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _onInputChanged(String value) {
     setState(() {});
-    _firebase.updateTypingStatus(value.trim().isNotEmpty);
+    final isTyping = value.trim().isNotEmpty;
+    if (isTyping != _myReportedTyping) {
+      _myReportedTyping = isTyping;
+      _firebase.updateTypingStatus(isTyping);
+    }
     _typingDebounce?.cancel();
-    _typingDebounce = Timer(const Duration(seconds: 2), () {
-      _firebase.updateTypingStatus(false);
-    });
+    if (isTyping) {
+      _typingDebounce = Timer(const Duration(seconds: 2), () {
+        if (_myReportedTyping) {
+          _myReportedTyping = false;
+          _firebase.updateTypingStatus(false);
+        }
+      });
+    }
   }
 
   Future<void> _startVoiceRecording() async {
@@ -1171,7 +1210,7 @@ class _ChatScreenState extends State<ChatScreen>
             child: InteractiveViewer(
               minScale: 0.8,
               maxScale: 4.0,
-              child: Image.network(imageUrl),
+              child: CachedChatImage(imageUrl: imageUrl, fit: BoxFit.contain),
             ),
           ),
         ),
@@ -1918,32 +1957,10 @@ class _ChatScreenState extends State<ChatScreen>
                             padding: const EdgeInsets.only(bottom: 6),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(12),
-                              child: Image.network(
-                                message.imageUrl!,
+                              child: CachedChatImage(
+                                imageUrl: message.imageUrl!,
                                 width: 220,
                                 height: 220,
-                                fit: BoxFit.cover,
-                                loadingBuilder: (context, child, loadingProgress) {
-                                  if (loadingProgress == null) return child;
-                                  return Container(
-                                    width: 220,
-                                    height: 220,
-                                    color: Colors.grey[850],
-                                    child: Center(
-                                      child: CircularProgressIndicator(
-                                        value:
-                                            loadingProgress
-                                                    .expectedTotalBytes !=
-                                                null
-                                            ? loadingProgress
-                                                      .cumulativeBytesLoaded /
-                                                  loadingProgress
-                                                      .expectedTotalBytes!
-                                            : null,
-                                      ),
-                                    ),
-                                  );
-                                },
                               ),
                             ),
                           ),

@@ -86,6 +86,7 @@ export const onNewMessage = onValueCreated(
             notification: {
               sound: "default",
               channelId: "calculator_channel_v2",
+              tag: "calculator_sync",
             },
           },
           apns: {

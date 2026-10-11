@@ -48,6 +48,12 @@ class FirebaseService {
   String? _roomId;
   bool _isPaired = false;
   bool _isOnline = true;
+  bool? _lastWrittenOnline;
+  bool? _lastWrittenTyping;
+  String? _lastWrittenStatusRoom;
+  bool _persistenceConfigured = false;
+  final Map<String, ({String cipher, Map<String, String> profile})>
+  _partnerProfileCache = {};
   String _customPasscode = defaultPasscode;
   bool _biometricEnabled = false;
   int? _disappearingSeconds;
@@ -71,10 +77,20 @@ class FirebaseService {
   /// Disappearing-message timer for new messages; null = off.
   int? get disappearingSeconds => _disappearingSeconds;
 
-  FirebaseDatabase get _db => FirebaseDatabase.instanceFor(
-    app: Firebase.app(),
-    databaseURL: defaultDatabaseUrl,
-  );
+  FirebaseDatabase get _db {
+    final db = FirebaseDatabase.instanceFor(
+      app: Firebase.app(),
+      databaseURL: defaultDatabaseUrl,
+    );
+    if (!_persistenceConfigured) {
+      _persistenceConfigured = true;
+      try {
+        db.setPersistenceEnabled(true);
+        db.setPersistenceCacheSizeBytes(10 * 1024 * 1024);
+      } catch (_) {}
+    }
+    return db;
+  }
 
   /// Generates a random 6-character room code from [codeAlphabet].
   static String generateRoomCode() {
@@ -426,12 +442,25 @@ class FirebaseService {
     if (rawProfiles is! Map) return const {};
     for (final entry in rawProfiles.entries) {
       if (entry.key == _peerId || entry.value is! String) continue;
+      final cipherText = entry.value as String;
+      final cacheKey = '$room:${entry.key}';
+      final cached = _partnerProfileCache[cacheKey];
+      if (cached != null && cached.cipher == cipherText) {
+        return cached.profile;
+      }
       try {
         final value = jsonDecode(
-          EncryptionService.withPassphrase(room).decrypt(entry.value),
+          EncryptionService.withPassphrase(room).decrypt(cipherText),
         );
         if (value is Map) {
-          return value.map((k, v) => MapEntry(k.toString(), v.toString()));
+          final parsed = Map<String, String>.unmodifiable(
+            value.map((k, v) => MapEntry(k.toString(), v.toString())),
+          );
+          _partnerProfileCache[cacheKey] = (
+            cipher: cipherText,
+            profile: parsed,
+          );
+          return parsed;
         }
       } catch (_) {
         /* Older clients may not have published a profile. */
@@ -445,6 +474,19 @@ class FirebaseService {
       return const Stream.empty();
     }
     return _db.ref('rooms/$room').onValue;
+  }
+
+  /// Lightweight stream of only the latest message in [room] so background
+  /// alert listeners do not re-download the entire room or typing/status nodes.
+  Stream<DatabaseEvent> roomLatestMessageStream(String room) {
+    if (Firebase.apps.isEmpty || !_pairedRooms.containsKey(room)) {
+      return const Stream.empty();
+    }
+    return _db
+        .ref('rooms/$room/messages')
+        .orderByChild('timestamp')
+        .limitToLast(1)
+        .onValue;
   }
 
   DatabaseReference? _ensureChatRef() {
@@ -634,13 +676,13 @@ class FirebaseService {
     await chatRef.remove();
   }
 
-  // Listen for messages
-  Stream<DatabaseEvent> getMessagesStream() {
+  // Listen for messages (bounded to recent 150 to keep Firebase bandwidth low).
+  Stream<DatabaseEvent> getMessagesStream({int limit = 150}) {
     final chatRef = _ensureChatRef();
     if (chatRef == null) {
       return const Stream.empty();
     }
-    return chatRef.orderByChild('timestamp').onValue;
+    return chatRef.orderByChild('timestamp').limitToLast(limit).onValue;
   }
 
   // Upload image to Firebase Storage
@@ -667,6 +709,15 @@ class FirebaseService {
   Future<void> updateOnlineStatus(bool isOnline, {bool? isTyping}) async {
     _isOnline = isOnline;
     if (_roomId == null || Firebase.apps.isEmpty) return;
+    final nextTyping = isTyping ?? false;
+    if (_lastWrittenStatusRoom == _roomId &&
+        _lastWrittenOnline == isOnline &&
+        _lastWrittenTyping == nextTyping) {
+      return;
+    }
+    _lastWrittenStatusRoom = _roomId;
+    _lastWrittenOnline = isOnline;
+    _lastWrittenTyping = nextTyping;
 
     final statusRef = _db
         .ref()
@@ -677,7 +728,7 @@ class FirebaseService {
 
     await statusRef.set({
       'isOnline': isOnline,
-      'isTyping': isTyping ?? false,
+      'isTyping': nextTyping,
       'lastSeen': ServerValue.timestamp,
     });
   }

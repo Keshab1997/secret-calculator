@@ -1,6 +1,6 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
+
+import '../services/media_cache_service.dart';
 
 const chatGreen = Color(0xFF1DAA61);
 const chatInk = Color(0xFF172126);
@@ -28,14 +28,7 @@ class ProfileAvatar extends StatelessWidget {
   const ProfileAvatar({super.key, this.photo, this.radius = 25});
   @override
   Widget build(BuildContext context) {
-    ImageProvider? image;
-    try {
-      if (photo != null && photo!.isNotEmpty) {
-        image = MemoryImage(base64Decode(photo!));
-      }
-    } catch (_) {
-      /* A malformed remote image falls back to the person icon. */
-    }
+    final image = MediaCacheService().avatarProvider(photo);
     return CircleAvatar(
       radius: radius,
       backgroundColor: const Color(0xFFCEEAF2),
