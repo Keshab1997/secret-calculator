@@ -447,8 +447,9 @@ class _CallScreenState extends State<CallScreen> {
           ),
           if (_localStream != null)
             Positioned(
-              top: 16,
-              right: 16,
+              // Below the floating header (lock row + name + timer).
+              top: MediaQuery.of(context).padding.top + 124,
+              right: 12,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(14),
                 child: SizedBox(
@@ -485,6 +486,107 @@ class _CallScreenState extends State<CallScreen> {
         ? _formatDuration(_elapsedSeconds)
         : (isRingingIncoming ? 'Incoming Encrypted Call...' : 'Ringing...');
 
+    if (widget.isVideo) {
+      return _buildVideoLayout(statusLabel, isRingingIncoming);
+    }
+    return _buildVoiceLayout(statusLabel, isRingingIncoming);
+  }
+
+  /// WhatsApp-style: video fills the whole screen and the header, timer and
+  /// controls float on top of it behind gradient scrims.
+  Widget _buildVideoLayout(String statusLabel, bool isRingingIncoming) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0B0914),
+      body: Stack(
+        children: [
+          Positioned.fill(child: _buildVideoStage()),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0xB3000000), Color(0x00000000)],
+                ),
+              ),
+              child: SafeArea(
+                bottom: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 26),
+                  child: Column(
+                    children: [
+                      _buildTypeRow(),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Secret Partner',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          shadows: [
+                            Shadow(blurRadius: 8, color: Colors.black54),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        statusLabel,
+                        style: TextStyle(
+                          color: _callStatus == 'connected'
+                              ? Colors.greenAccent
+                              : Colors.amberAccent,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          shadows: const [
+                            Shadow(blurRadius: 8, color: Colors.black54),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Color(0x00000000), Color(0xCC000000)],
+                ),
+              ),
+              child: SafeArea(
+                top: false,
+                child: Padding(
+                  padding: const EdgeInsets.only(
+                    top: 28,
+                    bottom: 20,
+                    left: 24,
+                    right: 24,
+                  ),
+                  child: isRingingIncoming
+                      ? _buildRingControls()
+                      : _buildActiveControls(),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVoiceLayout(String statusLabel, bool isRingingIncoming) {
     return Scaffold(
       backgroundColor: const Color(0xFF0B0914),
       body: SafeArea(
@@ -493,36 +595,13 @@ class _CallScreenState extends State<CallScreen> {
             // Top bar
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.lock_outline,
-                    size: 16,
-                    color: Colors.greenAccent,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    widget.isVideo
-                        ? 'Peer-to-Peer Video Call'
-                        : 'Peer-to-Peer Voice Call',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
+              child: _buildTypeRow(),
             ),
 
             const Spacer(),
 
-            // Avatar / video stage
-            if (widget.isVideo)
-              Expanded(child: _buildVideoStage())
-            else
-              _buildAvatarStage(),
+            // Avatar stage
+            _buildAvatarStage(),
 
             const SizedBox(height: 28),
             const Text(
@@ -551,67 +630,85 @@ class _CallScreenState extends State<CallScreen> {
             Padding(
               padding: const EdgeInsets.only(bottom: 40, left: 24, right: 24),
               child: isRingingIncoming
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildCallActionButton(
-                          icon: Icons.call_end,
-                          label: 'Decline',
-                          color: Colors.redAccent,
-                          onTap: _endCall,
-                        ),
-                        _buildCallActionButton(
-                          icon: Icons.call,
-                          label: 'Accept',
-                          color: Colors.green,
-                          onTap: _acceptIncomingCall,
-                        ),
-                      ],
-                    )
-                  : Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        _buildCallActionButton(
-                          icon: _isMuted ? Icons.mic_off : Icons.mic,
-                          label: _isMuted ? 'Unmute' : 'Mute',
-                          color: _isMuted
-                              ? Colors.orangeAccent
-                              : Colors.white12,
-                          onTap: _toggleMute,
-                        ),
-                        if (widget.isVideo)
-                          _buildCallActionButton(
-                            icon: _isCameraOff
-                                ? Icons.videocam_off
-                                : Icons.videocam,
-                            label: _isCameraOff ? 'Cam Off' : 'Camera',
-                            color: _isCameraOff
-                                ? Colors.redAccent
-                                : Colors.white12,
-                            onTap: _toggleCamera,
-                          ),
-                        _buildCallActionButton(
-                          icon: _isSpeakerOn
-                              ? Icons.volume_up
-                              : Icons.volume_down,
-                          label: 'Speaker',
-                          color: _isSpeakerOn
-                              ? Colors.blueAccent
-                              : Colors.white12,
-                          onTap: _toggleSpeaker,
-                        ),
-                        _buildCallActionButton(
-                          icon: Icons.call_end,
-                          label: 'End',
-                          color: Colors.redAccent,
-                          onTap: _endCall,
-                        ),
-                      ],
-                    ),
+                  ? _buildRingControls()
+                  : _buildActiveControls(),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildTypeRow() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(Icons.lock_outline, size: 16, color: Colors.greenAccent),
+        const SizedBox(width: 6),
+        Text(
+          widget.isVideo
+              ? 'Peer-to-Peer Video Call'
+              : 'Peer-to-Peer Voice Call',
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRingControls() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildCallActionButton(
+          icon: Icons.call_end,
+          label: 'Decline',
+          color: Colors.redAccent,
+          onTap: _endCall,
+        ),
+        _buildCallActionButton(
+          icon: Icons.call,
+          label: 'Accept',
+          color: Colors.green,
+          onTap: _acceptIncomingCall,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActiveControls() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildCallActionButton(
+          icon: _isMuted ? Icons.mic_off : Icons.mic,
+          label: _isMuted ? 'Unmute' : 'Mute',
+          color: _isMuted ? Colors.orangeAccent : Colors.white12,
+          onTap: _toggleMute,
+        ),
+        if (widget.isVideo)
+          _buildCallActionButton(
+            icon: _isCameraOff ? Icons.videocam_off : Icons.videocam,
+            label: _isCameraOff ? 'Cam Off' : 'Camera',
+            color: _isCameraOff ? Colors.redAccent : Colors.white12,
+            onTap: _toggleCamera,
+          ),
+        _buildCallActionButton(
+          icon: _isSpeakerOn ? Icons.volume_up : Icons.volume_down,
+          label: 'Speaker',
+          color: _isSpeakerOn ? Colors.blueAccent : Colors.white12,
+          onTap: _toggleSpeaker,
+        ),
+        _buildCallActionButton(
+          icon: Icons.call_end,
+          label: 'End',
+          color: Colors.redAccent,
+          onTap: _endCall,
+        ),
+      ],
     );
   }
 
