@@ -232,6 +232,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _disappearingSeconds = _firebase.disappearingSeconds;
     _firebase.updateOnlineStatus(true);
     _listenForMessages();
     _listenForPartnerStatus();
@@ -1104,6 +1105,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  String _formatDisappearing(int seconds) {
+    if (seconds % 3600 == 0) return '${seconds ~/ 3600}h';
+    if (seconds % 60 == 0) return '${seconds ~/ 60}m';
+    return '${seconds}s';
+  }
+
   void _showDisappearingOptions() {
     const options = <MapEntry<String, int?>>[
       MapEntry('Off (Keep messages)', null),
@@ -1150,6 +1157,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     setState(() {
                       _disappearingSeconds = opt.value;
                     });
+                    // Persist so leaving the chat doesn't reset the timer.
+                    _firebase.setDisappearingSeconds(opt.value);
                     Navigator.pop(sheetContext);
                   },
                 );
@@ -1507,7 +1516,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     Text(
                       _disappearingSeconds == null
                           ? 'Disappearing: Off'
-                          : 'Disappearing: ${_disappearingSeconds}s',
+                          : 'Disappearing: ${_formatDisappearing(_disappearingSeconds!)}',
                     ),
                   ],
                 ),
@@ -1784,7 +1793,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             decoration: InputDecoration(
                               hintText: _disappearingSeconds == null
                                   ? 'Type a secret message...'
-                                  : 'Disappearing message (${_disappearingSeconds}s)...',
+                                  : 'Disappearing message (${_formatDisappearing(_disappearingSeconds!)})...',
                               hintStyle: TextStyle(color: Colors.grey[500]),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(24),

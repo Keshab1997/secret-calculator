@@ -35,6 +35,7 @@ class FirebaseService {
   bool _isOnline = true;
   String _customPasscode = defaultPasscode;
   bool _biometricEnabled = false;
+  int? _disappearingSeconds;
   final EncryptionService _encryption = EncryptionService();
 
   /// Unique per-install/session peer identifier used as `senderId` and status key.
@@ -51,6 +52,9 @@ class FirebaseService {
 
   /// Whether fingerprint/biometric verification is required after entering the passcode.
   bool get biometricEnabled => _biometricEnabled;
+
+  /// Disappearing-message timer for new messages; null = off.
+  int? get disappearingSeconds => _disappearingSeconds;
 
   FirebaseDatabase get _db => FirebaseDatabase.instanceFor(
     app: Firebase.app(),
@@ -121,6 +125,10 @@ class FirebaseService {
         if (savedBio is bool) {
           _biometricEnabled = savedBio;
         }
+        final savedDisappearing = decoded['disappearingSeconds'];
+        if (savedDisappearing is int) {
+          _disappearingSeconds = savedDisappearing;
+        }
         final savedRoom = decoded['roomId'];
         if (savedRoom is String &&
             isValidRoomCode(savedRoom) &&
@@ -150,6 +158,7 @@ class FirebaseService {
           'roomId': _isPaired ? _roomId : null,
           'customPasscode': _customPasscode,
           'biometricEnabled': _biometricEnabled,
+          'disappearingSeconds': _disappearingSeconds,
         }),
       );
     } catch (_) {
@@ -169,6 +178,12 @@ class FirebaseService {
   /// Updates and persists the biometric lock setting.
   Future<void> setBiometricEnabled(bool enabled) async {
     _biometricEnabled = enabled;
+    await _saveState();
+  }
+
+  /// Updates and persists the disappearing-message timer (null = off).
+  Future<void> setDisappearingSeconds(int? seconds) async {
+    _disappearingSeconds = seconds;
     await _saveState();
   }
 
