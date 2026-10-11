@@ -59,6 +59,24 @@ class NativeBridgeService {
     }
   }
 
+  /// Plays the device's default ringtone (looping) for an incoming call.
+  Future<void> startRingtone() async {
+    try {
+      await _channel.invokeMethod('startRingtone');
+    } catch (_) {
+      // Fail silently when the platform channel is unavailable (e.g. tests).
+    }
+  }
+
+  /// Stops the ringtone started by [startRingtone].
+  Future<void> stopRingtone() async {
+    try {
+      await _channel.invokeMethod('stopRingtone');
+    } catch (_) {
+      // Fail silently when the platform channel is unavailable (e.g. tests).
+    }
+  }
+
   /// Decrypts an AES-256-GCM encrypted base64 audio payload, writes it to a
   /// temporary `.m4a` file, and plays it via the native media player.
   Future<bool> playEncryptedAudio(

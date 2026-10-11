@@ -12,6 +12,7 @@ import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/messaging_style.dart';
+import 'call_screen.dart';
 import 'chats_screen.dart';
 export '../models/calculator_engine.dart';
 
@@ -32,6 +33,8 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   final NotificationService _notifications = NotificationService();
   final Map<String, StreamSubscription<DatabaseEvent>> _roomMessageSubs = {};
   final Map<String, Set<String>> _seenRoomMessageIds = {};
+  final Map<String, StreamSubscription<DatabaseEvent>> _roomCallSubs = {};
+  dynamic _lastHandledRingId;
   final ScrollController _expressionScroll = ScrollController();
   late final CalculatorHistoryStore _store;
   late final Future<void> _historyReady;
@@ -46,6 +49,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     _store = widget.historyStore ?? CalculatorHistoryStore();
     _historyReady = _loadHistory();
     _syncRoomMessageListeners();
+    _syncRoomCallListeners();
   }
 
   Future<void> _loadHistory() async {
@@ -100,9 +104,69 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     }
   }
 
+  /// Rings for real calls even while the calculator is the visible screen.
+  /// The chat list and open chat keep their own listeners, so this only acts
+  /// while the calculator route is current (also true when the app sits
+  /// backgrounded on the calculator).
+  void _syncRoomCallListeners() {
+    for (final code in _roomCallSubs.keys.toList()) {
+      if (!_firebase.pairedRooms.containsKey(code)) {
+        _roomCallSubs.remove(code)?.cancel();
+      }
+    }
+    for (final code in _firebase.pairedRooms.keys) {
+      _roomCallSubs.putIfAbsent(code, () {
+        return _firebase.roomChildStream(code, 'call').listen((event) {
+          final call = event.snapshot.value;
+          if (call is! Map) return;
+          if (call['status']?.toString() != 'ringing') return;
+          final callerId = call['callerId']?.toString() ?? '';
+          if (callerId.isEmpty || callerId == _firebase.peerId) return;
+          final ringId = call['startedAt'];
+          if (ringId == null || ringId == _lastHandledRingId) return;
+          if (_navigating) return;
+          if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+          _lastHandledRingId = ringId;
+          _openIncomingCall(code, call['type']?.toString() == 'video', ringId);
+        }, onError: (_) {});
+      });
+    }
+  }
+
+  Future<void> _openIncomingCall(
+    String code,
+    bool isVideo,
+    Object ringId,
+  ) async {
+    _navigating = true;
+    try {
+      await _firebase.selectRoom(code);
+      if (!mounted) return;
+      _notifications.showFakeNotification(messageId: 'call_$ringId');
+      unawaited(_native.setSecureScreen(true));
+      await Navigator.push(
+        context,
+        messagingRoute(CallScreen(isVideo: isVideo, isIncoming: true)),
+      );
+    } catch (_) {
+      // The node-driven UI catches up on the next snapshot; a missed call is
+      // still logged on the caller side when the ring times out.
+    } finally {
+      unawaited(_native.setSecureScreen(false));
+      _navigating = false;
+      if (mounted) {
+        _syncRoomMessageListeners();
+        _syncRoomCallListeners();
+      }
+    }
+  }
+
   @override
   void dispose() {
     for (final sub in _roomMessageSubs.values) {
+      sub.cancel();
+    }
+    for (final sub in _roomCallSubs.values) {
       sub.cancel();
     }
     _expressionScroll.dispose();
@@ -180,7 +244,10 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     } finally {
       unawaited(_native.setSecureScreen(false));
       _navigating = false;
-      if (mounted) _syncRoomMessageListeners();
+      if (mounted) {
+        _syncRoomMessageListeners();
+        _syncRoomCallListeners();
+      }
     }
   }
 

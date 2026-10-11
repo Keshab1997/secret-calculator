@@ -3,10 +3,15 @@ package com.keshabstudios.calculator
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -19,6 +24,8 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var mediaRecorder: MediaRecorder? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var ringtonePlayer: MediaPlayer? = null
+    private var ringtoneVibrator: Vibrator? = null
     private var currentRecordingPath: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
 
@@ -57,6 +64,11 @@ class MainActivity : FlutterFragmentActivity() {
                         } else {
                             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
                         }
+                        result.success(true)
+                    }
+                    "startRingtone" -> startRingtone(result)
+                    "stopRingtone" -> {
+                        stopRingtoneInternal()
                         result.success(true)
                     }
                     else -> result.notImplemented()
@@ -170,6 +182,70 @@ class MainActivity : FlutterFragmentActivity() {
         mediaPlayer = null
     }
 
+    private fun startRingtone(result: MethodChannel.Result) {
+        try {
+            stopRingtoneInternal()
+            val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
+                ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val player = MediaPlayer()
+            player.setDataSource(this, uri)
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            player.isLooping = true
+            player.prepare()
+            player.start()
+            ringtonePlayer = player
+            startRingVibration()
+            result.success(true)
+        } catch (e: Exception) {
+            stopRingtoneInternal()
+            result.error("RING_ERROR", e.message ?: "Failed to start ringtone", null)
+        }
+    }
+
+    private fun startRingVibration() {
+        try {
+            val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val manager = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                manager.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            }
+            ringtoneVibrator = vibrator
+            val pattern = longArrayOf(0, 1000, 800)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(pattern, 0)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun stopRingtoneInternal() {
+        try {
+            ringtonePlayer?.apply {
+                if (isPlaying) {
+                    stop()
+                }
+                release()
+            }
+        } catch (_: Exception) {
+        }
+        ringtonePlayer = null
+        try {
+            ringtoneVibrator?.cancel()
+        } catch (_: Exception) {
+        }
+        ringtoneVibrator = null
+    }
+
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -187,6 +263,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onDestroy() {
         stopRecordingInternal()
         stopAudioInternal()
+        stopRingtoneInternal()
         super.onDestroy()
     }
 }

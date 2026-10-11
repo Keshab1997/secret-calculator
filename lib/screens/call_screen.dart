@@ -96,6 +96,10 @@ class _CallScreenState extends State<CallScreen> {
     // The incoming screen is only pushed while the call node exists, so a
     // null snapshot right away means the caller already cancelled.
     _hasSeenCallNode = widget.isIncoming;
+    if (widget.isIncoming) {
+      // Ring on this phone until accepted, declined or disposed.
+      _native.startRingtone();
+    }
     _startRingTimer();
     _initCall();
   }
@@ -334,6 +338,7 @@ class _CallScreenState extends State<CallScreen> {
   Future<void> _acceptIncomingCall() async {
     if (_accepting) return;
     _accepting = true;
+    _native.stopRingtone();
     try {
       final accepted = await _firebase.acceptCall();
       if (!accepted) {
@@ -496,6 +501,7 @@ class _CallScreenState extends State<CallScreen> {
     _callSub?.cancel();
     _teardownWebRTC();
     _native.stopAudio();
+    _native.stopRingtone();
     // Swiping back hangs up for everyone; a no-op if the node is already gone.
     _firebase
         .endCall(outcome: _hangupOutcome, callInfo: _lastCallRaw)
