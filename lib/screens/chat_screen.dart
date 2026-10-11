@@ -16,6 +16,7 @@ import '../services/notification_service.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/emoji_keyboard.dart';
 import '../widgets/option_sheet.dart';
+import '../widgets/photo_upload_indicator.dart';
 import '../widgets/sticker_keyboard.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/sticker_art.dart';
@@ -1997,7 +1998,6 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _buildPendingBubble(_PendingSend pending) {
     final failed = pending.error != null;
     final uploading = !failed && pending.progress != null;
-    final progress = pending.progress ?? 0;
 
     return Semantics(
       container: true,
@@ -2031,27 +2031,10 @@ class _ChatScreenState extends State<ChatScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (pending.image != null)
-                  Container(
-                    width: 150,
-                    height: 150,
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Center(
-                      child: failed
-                          ? const Icon(
-                              Icons.image_not_supported_outlined,
-                              color: Colors.white70,
-                            )
-                          : Text(
-                              '${(progress * 100).round()}%',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                    ),
+                  PhotoUploadIndicator(
+                    image: pending.image!,
+                    progress: pending.progress,
+                    failed: failed,
                   ),
                 if (pending.image != null &&
                     pending.text != null &&
@@ -2115,6 +2098,18 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                     ],
                   )
+                else if (pending.image != null)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.cloud_upload_outlined, size: 14, color: _sub),
+                      const SizedBox(width: 8),
+                      Text(
+                        uploading ? 'Uploading photo…' : 'Preparing photo…',
+                        style: TextStyle(fontSize: 11.5, color: _sub),
+                      ),
+                    ],
+                  )
                 else
                   Row(
                     mainAxisSize: MainAxisSize.min,
@@ -2125,12 +2120,11 @@ class _ChatScreenState extends State<ChatScreen>
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           color: _ink.withValues(alpha: 0.55),
-                          value: uploading ? progress : null,
                         ),
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        uploading ? 'Uploading photo…' : 'Sending…',
+                        'Sending…',
                         style: TextStyle(fontSize: 11.5, color: _sub),
                       ),
                     ],
