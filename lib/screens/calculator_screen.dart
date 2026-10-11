@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
+
+import 'package:firebase_database/firebase_database.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,6 +10,7 @@ import '../models/calculator_engine.dart';
 import '../services/calculator_history_store.dart';
 import '../services/firebase_service.dart';
 import '../services/native_bridge_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/messaging_style.dart';
 import 'chats_screen.dart';
 export '../models/calculator_engine.dart';
@@ -25,6 +29,9 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   final CalculatorEngine _engine = CalculatorEngine();
   final FirebaseService _firebase = FirebaseService();
   final NativeBridgeService _native = NativeBridgeService();
+  final NotificationService _notifications = NotificationService();
+  final Map<String, StreamSubscription<DatabaseEvent>> _roomMessageSubs = {};
+  final Map<String, Set<String>> _seenRoomMessageIds = {};
   final ScrollController _expressionScroll = ScrollController();
   late final CalculatorHistoryStore _store;
   late final Future<void> _historyReady;
@@ -38,6 +45,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     super.initState();
     _store = widget.historyStore ?? CalculatorHistoryStore();
     _historyReady = _loadHistory();
+    _syncRoomMessageListeners();
   }
 
   Future<void> _loadHistory() async {
@@ -49,8 +57,55 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     if (mounted) setState(() {});
   }
 
+  void _syncRoomMessageListeners() {
+    for (final code in _roomMessageSubs.keys.toList()) {
+      if (!_firebase.pairedRooms.containsKey(code)) {
+        _roomMessageSubs.remove(code)?.cancel();
+        _seenRoomMessageIds.remove(code);
+      }
+    }
+    for (final code in _firebase.pairedRooms.keys) {
+      _roomMessageSubs.putIfAbsent(code, () {
+        var primed = false;
+        final seen = _seenRoomMessageIds.putIfAbsent(code, () => <String>{});
+        return _firebase.roomStream(code).listen((event) {
+          final value = event.snapshot.value;
+          final messages = value is Map ? value['messages'] : null;
+          if (messages is! Map) {
+            primed = true;
+            return;
+          }
+          var hasIncoming = false;
+          for (final entry in messages.entries) {
+            final key = entry.key.toString();
+            final isNew = seen.add(key);
+            final msg = entry.value;
+            if (!primed || !isNew || msg is! Map) continue;
+            final senderId = msg['senderId']?.toString() ?? '';
+            final hasBody =
+                msg['text'] != null ||
+                msg['imageUrl'] != null ||
+                msg['audioData'] != null;
+            if (hasBody &&
+                senderId.isNotEmpty &&
+                senderId != _firebase.peerId) {
+              hasIncoming = true;
+            }
+          }
+          primed = true;
+          if (hasIncoming && !_navigating) {
+            _notifications.showFakeNotification();
+          }
+        }, onError: (_) {});
+      });
+    }
+  }
+
   @override
   void dispose() {
+    for (final sub in _roomMessageSubs.values) {
+      sub.cancel();
+    }
     _expressionScroll.dispose();
     super.dispose();
   }
@@ -119,6 +174,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
       await Navigator.push(context, messagingRoute(const ChatsScreen()));
     } finally {
       _navigating = false;
+      if (mounted) _syncRoomMessageListeners();
     }
   }
 

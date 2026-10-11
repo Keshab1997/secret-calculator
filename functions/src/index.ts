@@ -43,76 +43,82 @@ export const onNewMessage = onValueCreated(
       return null;
     }
 
-    // Find the other peer's FCM token in the same room.
+    // Find all non-sender FCM tokens in the room (e.g. if a peer reinstalled
+    // and generated a new peerId before the old stale entry was cleaned up).
     const tokensSnap = await getDatabase()
       .ref(`rooms/${roomId}/tokens`)
       .once("value");
     const tokens = (tokensSnap.val() || {}) as Record<string, unknown>;
 
-    const partnerEntry = Object.entries(tokens).find(
-      ([peerId]) => peerId !== senderId
-    );
-    const partnerToken = partnerEntry?.[1];
-    const partnerPeerId = partnerEntry?.[0];
+    const partnerEntries = Object.entries(tokens).filter(
+      ([peerId, token]) =>
+        peerId !== senderId && typeof token === "string" && token.length > 0
+    ) as Array<[string, string]>;
 
-    if (!partnerToken || typeof partnerToken !== "string") {
+    if (partnerEntries.length === 0) {
       // No partner device registered for push — local notifications will
       // still fire if the app is open or backgrounded.
       info(`onNewMessage: no partner token in room ${roomId}, skipping push`);
       return null;
     }
 
-    try {
-      await getMessaging().send({
-        notification: {
-          // Disguised so the app still looks like a calculator.
-          title: "Calculator",
-          body: "📊 New calculation saved",
-        },
-        token: partnerToken,
-        data: {
-          // Extra data so the app can route the tap to open the chat.
-          click_action: "FLUTTER_NOTIFICATION_CLICK",
-          roomId: String(roomId),
-          messageId: String(messageId),
-        },
-        android: {
-          priority: "high",
+    const seenTokens = new Set<string>();
+    for (const [partnerPeerId, partnerToken] of partnerEntries) {
+      if (seenTokens.has(partnerToken)) continue;
+      seenTokens.add(partnerToken);
+
+      try {
+        await getMessaging().send({
           notification: {
-            sound: "default",
-            channelId: "calculator_channel_v2",
+            // Disguised so the app still looks like a calculator.
+            title: "Calculator",
+            body: "📊 New calculation saved",
           },
-        },
-        apns: {
-          payload: {
-            aps: {
+          token: partnerToken,
+          data: {
+            // Extra data so the app can route the tap to open the chat.
+            click_action: "FLUTTER_NOTIFICATION_CLICK",
+            roomId: String(roomId),
+            messageId: String(messageId),
+          },
+          android: {
+            priority: "high",
+            notification: {
               sound: "default",
+              channelId: "calculator_channel_v2",
             },
           },
-        },
-      });
-      info(`onNewMessage: push sent in room ${roomId}`);
-    } catch (err: unknown) {
-      // Token may be stale — drop it so the next message doesn't fail again.
-      // The client re-registers its token via registerFcmToken() on join.
-      const code =
-        typeof err === "object" && err !== null && "code" in err
-          ? String((err as { code: unknown }).code)
-          : "";
-      if (
-        code.includes("registration-token-not-registered") ||
-        code.includes("invalid-argument")
-      ) {
-        try {
-          await getDatabase()
-            .ref(`rooms/${roomId}/tokens/${partnerPeerId}`)
-            .remove();
-          info(`onNewMessage: removed stale token in room ${roomId}`);
-        } catch (cleanupErr) {
-          logError("Failed to remove stale FCM token:", cleanupErr);
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+              },
+            },
+          },
+        });
+        info(`onNewMessage: push sent in room ${roomId} to ${partnerPeerId}`);
+      } catch (err: unknown) {
+        // Token may be stale — drop it so the next message doesn't fail again.
+        // The client re-registers its token via registerFcmToken() on join.
+        const code =
+          typeof err === "object" && err !== null && "code" in err
+            ? String((err as { code: unknown }).code)
+            : "";
+        if (
+          code.includes("registration-token-not-registered") ||
+          code.includes("invalid-argument")
+        ) {
+          try {
+            await getDatabase()
+              .ref(`rooms/${roomId}/tokens/${partnerPeerId}`)
+              .remove();
+            info(`onNewMessage: removed stale token in room ${roomId}`);
+          } catch (cleanupErr) {
+            logError("Failed to remove stale FCM token:", cleanupErr);
+          }
+        } else {
+          logError("Failed to send FCM:", err);
         }
-      } else {
-        logError("Failed to send FCM:", err);
       }
     }
 

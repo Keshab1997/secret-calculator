@@ -8,6 +8,7 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'encryption_service.dart';
 
@@ -111,8 +112,27 @@ class FirebaseService {
   @visibleForTesting
   File? stateFileOverride;
 
-  File _stateFile() {
+  Future<File> _stateFile() async {
     if (stateFileOverride != null) return stateFileOverride!;
+    try {
+      final dir = await getApplicationSupportDirectory();
+      await dir.create(recursive: true);
+      final primary = File('${dir.path}/secret_calc_state.json');
+      if (!primary.existsSync()) {
+        final legacy = _legacyStateFile();
+        if (legacy.existsSync() && legacy.path != primary.path) {
+          try {
+            await legacy.copy(primary.path);
+          } catch (_) {}
+        }
+      }
+      return primary;
+    } catch (_) {
+      return _legacyStateFile();
+    }
+  }
+
+  File _legacyStateFile() {
     final parentDir = Directory.systemTemp.parent;
     final filesDir = Directory('${parentDir.path}/files');
     if (filesDir.existsSync()) {
@@ -124,7 +144,7 @@ class FirebaseService {
   /// Loads persisted `peerId`, `pairedRoomId`, `customPasscode`, and `biometricEnabled`.
   Future<void> loadSavedState() async {
     try {
-      final file = _stateFile();
+      final file = await _stateFile();
       if (!file.existsSync()) {
         await _saveState();
         return;
@@ -191,7 +211,7 @@ class FirebaseService {
 
   Future<void> _saveState({bool strict = false}) async {
     try {
-      final file = _stateFile();
+      final file = await _stateFile();
       await file.writeAsString(
         jsonEncode({
           'pairedRooms': _pairedRooms,
@@ -304,8 +324,8 @@ class FirebaseService {
           } catch (_) {}
         });
       }
-    } catch (_) {
-      // FCM unavailable (unit tests, missing google-services.json).
+    } catch (e) {
+      debugPrint('registerFcmToken failed: $e');
     }
   }
 

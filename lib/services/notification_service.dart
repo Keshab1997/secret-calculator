@@ -1,4 +1,19 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  try {
+    if (Firebase.apps.isEmpty) {
+      await Firebase.initializeApp();
+    }
+  } catch (_) {}
+  if (message.notification == null && message.data.isNotEmpty) {
+    await NotificationService().initialize(requestPermission: false);
+    await NotificationService().showFakeNotification();
+  }
+}
 
 class NotificationService {
   static final NotificationService _instance = NotificationService._internal();
@@ -7,6 +22,7 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
+  bool _fcmListenersRegistered = false;
 
   // Fake notification messages that look like calculator notifications
   static const List<String> _fakeMessages = [
@@ -22,17 +38,17 @@ class NotificationService {
     '🔄 Sync complete',
   ];
 
-  Future<void> initialize() async {
+  Future<void> initialize({bool requestPermission = true}) async {
     const androidSettings = AndroidInitializationSettings(
       '@mipmap/ic_launcher',
     );
-    const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+    final iosSettings = DarwinInitializationSettings(
+      requestAlertPermission: requestPermission,
+      requestBadgePermission: requestPermission,
+      requestSoundPermission: requestPermission,
     );
 
-    const initSettings = InitializationSettings(
+    final initSettings = InitializationSettings(
       android: androidSettings,
       iOS: iosSettings,
     );
@@ -44,9 +60,11 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >();
     if (android != null) {
-      // Android 13+ silently drops notifications unless POST_NOTIFICATIONS
-      // is granted — request it explicitly on startup.
-      await android.requestNotificationsPermission();
+      if (requestPermission) {
+        // Android 13+ silently drops notifications unless POST_NOTIFICATIONS
+        // is granted — request it explicitly on startup.
+        await android.requestNotificationsPermission();
+      }
       // Fresh channel id: Android refuses importance changes on an already
       // created channel, so existing installs would stay stuck on the old
       // silent/low-importance channel otherwise.
@@ -58,6 +76,23 @@ class NotificationService {
           importance: Importance.high,
         ),
       );
+    }
+
+    if (requestPermission &&
+        !_fcmListenersRegistered &&
+        Firebase.apps.isNotEmpty) {
+      _fcmListenersRegistered = true;
+      try {
+        await FirebaseMessaging.instance
+            .setForegroundNotificationPresentationOptions(
+              alert: true,
+              badge: false,
+              sound: true,
+            );
+        FirebaseMessaging.onMessage.listen((message) {
+          showFakeNotification(customMessage: message.notification?.body);
+        });
+      } catch (_) {}
     }
   }
 
