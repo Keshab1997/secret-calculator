@@ -55,9 +55,7 @@ class EmojiKeyboard extends StatelessWidget {
             backgroundColor: Color(0xFFEBEFF2),
             buttonIconColor: Colors.black26,
           ),
-          skinToneConfig: const SkinToneConfig(
-            enabled: true,
-          ),
+          skinToneConfig: const SkinToneConfig(enabled: true),
         ),
       ),
     );

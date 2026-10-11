@@ -124,23 +124,24 @@ void main() {
       expect(find.text('Pair Device'), findsOneWidget);
     });
 
-    testWidgets('ChatScreen renders themes, search, emoji and sticker buttons', (
-      WidgetTester tester,
-    ) async {
-      await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
+    testWidgets(
+      'ChatScreen renders themes, search, emoji and sticker buttons',
+      (WidgetTester tester) async {
+        await tester.pumpWidget(const MaterialApp(home: ChatScreen()));
 
-      expect(find.text('Secret Chat'), findsOneWidget);
-      expect(find.byTooltip('Quick Hide to Calculator'), findsOneWidget);
+        expect(find.text('Secret Chat'), findsOneWidget);
+        expect(find.byTooltip('Quick Hide to Calculator'), findsOneWidget);
 
-      // Check emoji and sticker buttons are present
-      expect(find.byIcon(Icons.emoji_emotions_outlined), findsOneWidget);
-      expect(find.byIcon(Icons.emoji_objects_outlined), findsOneWidget);
+        // Check emoji and sticker buttons are present
+        expect(find.byIcon(Icons.emoji_emotions_outlined), findsOneWidget);
+        expect(find.byIcon(Icons.emoji_objects_outlined), findsOneWidget);
 
-      // Toggle search bar
-      await tester.tap(find.byTooltip('Search Messages'));
-      await tester.pump();
-      expect(find.byType(TextField), findsNWidgets(2));
-    });
+        // Toggle search bar
+        await tester.tap(find.byTooltip('Search Messages'));
+        await tester.pump();
+        expect(find.byType(TextField), findsNWidgets(2));
+      },
+    );
   });
 
   group('Voice note hold-to-record', () {
