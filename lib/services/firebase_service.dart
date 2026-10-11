@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -14,6 +15,10 @@ class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
   factory FirebaseService() => _instance;
   FirebaseService._internal() : _peerId = generatePeerId();
+  @visibleForTesting
+  FirebaseService.forTesting(File stateFile)
+    : _peerId = generatePeerId(),
+      stateFileOverride = stateFile;
 
   /// Unambiguous 6-character code alphabet (excludes 0, O, 1, I).
   static const String codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -28,6 +33,14 @@ class FirebaseService {
   static final Random _random = Random.secure();
   static final RegExp _validCodePattern = RegExp(r'^[A-Z0-9]{6}$');
   static final RegExp _validPasscodePattern = RegExp(r'^[0-9]{4,8}$');
+
+  final Map<String, String> _pairedRooms = {};
+  Map<String, String> _profile = {
+    'name': 'Calculator user',
+    'about': 'Available',
+  };
+  Map<String, String> get pairedRooms => Map.unmodifiable(_pairedRooms);
+  Map<String, String> get profile => Map.unmodifiable(_profile);
 
   String _peerId;
   DatabaseReference? _chatRef;
@@ -95,7 +108,11 @@ class FirebaseService {
     await loadSavedState();
   }
 
+  @visibleForTesting
+  File? stateFileOverride;
+
   File _stateFile() {
+    if (stateFileOverride != null) return stateFileOverride!;
     final parentDir = Directory.systemTemp.parent;
     final filesDir = Directory('${parentDir.path}/files');
     if (filesDir.existsSync()) {
@@ -130,7 +147,29 @@ class FirebaseService {
         if (savedDisappearing is int) {
           _disappearingSeconds = savedDisappearing;
         }
+        final rooms = decoded['pairedRooms'];
+        if (rooms is Map) {
+          for (final entry in rooms.entries) {
+            if (isValidRoomCode(entry.key.toString())) {
+              _pairedRooms[entry.key.toString().trim().toUpperCase()] = entry
+                  .value
+                  .toString();
+            }
+          }
+        }
+        final profile = decoded['profile'];
+        if (profile is Map) {
+          _profile = profile.map(
+            (key, value) => MapEntry(key.toString(), value.toString()),
+          );
+        }
         final savedRoom = decoded['roomId'];
+        if (savedRoom is String && isValidRoomCode(savedRoom)) {
+          _pairedRooms.putIfAbsent(
+            savedRoom.trim().toUpperCase(),
+            () => 'Paired contact',
+          );
+        }
         if (savedRoom is String &&
             isValidRoomCode(savedRoom) &&
             Firebase.apps.isNotEmpty) {
@@ -150,11 +189,13 @@ class FirebaseService {
     }
   }
 
-  Future<void> _saveState() async {
+  Future<void> _saveState({bool strict = false}) async {
     try {
       final file = _stateFile();
       await file.writeAsString(
         jsonEncode({
+          'pairedRooms': _pairedRooms,
+          'profile': _profile,
           'peerId': _peerId,
           'roomId': _isPaired ? _roomId : null,
           'customPasscode': _customPasscode,
@@ -163,7 +204,8 @@ class FirebaseService {
         }),
       );
     } catch (_) {
-      // Ignore write failures in read-only or test environments.
+      if (strict) rethrow;
+      // Legacy settings remain best-effort in restricted environments.
     }
   }
 
@@ -192,7 +234,14 @@ class FirebaseService {
   Future<void> markRoomPaired() async {
     if (_roomId == null) return;
     _isPaired = true;
-    await _saveState();
+    _pairedRooms.putIfAbsent(_roomId!, () => 'Paired contact');
+    await _saveState(strict: true);
+    try {
+      await _publishProfile();
+    } catch (_) {
+      /* Profile can be retried from You. */
+    }
+    await registerFcmToken();
   }
 
   /// Unpairs the current room so the user can pair with a new code.
@@ -211,6 +260,7 @@ class FirebaseService {
         // Best effort — stale tokens are also dropped by the Cloud Function.
       }
     }
+    _pairedRooms.remove(_roomId);
     _roomId = null;
     _chatRef = null;
     _isPaired = false;
@@ -227,7 +277,9 @@ class FirebaseService {
   /// Failures are swallowed: local notifications still cover the case where
   /// the app is open or backgrounded.
   Future<void> registerFcmToken() async {
-    if (_roomId == null || Firebase.apps.isEmpty) return;
+    if ((_roomId == null && _pairedRooms.isEmpty) || Firebase.apps.isEmpty) {
+      return;
+    }
     try {
       final messaging = FirebaseMessaging.instance;
       try {
@@ -237,27 +289,18 @@ class FirebaseService {
       }
       final token = await messaging.getToken();
       if (token != null && token.isNotEmpty) {
-        await _db
-            .ref()
-            .child('rooms')
-            .child(_roomId!)
-            .child('tokens')
-            .child(_peerId)
-            .set(token);
+        for (final room in {..._pairedRooms.keys, ?_roomId}) {
+          await _db.ref('rooms/$room/tokens/$_peerId').set(token);
+        }
       }
       if (!_fcmRefreshRegistered) {
         _fcmRefreshRegistered = true;
         messaging.onTokenRefresh.listen((fresh) async {
-          final room = _roomId;
-          if (room == null || fresh.isEmpty) return;
+          if (fresh.isEmpty) return;
           try {
-            await _db
-                .ref()
-                .child('rooms')
-                .child(room)
-                .child('tokens')
-                .child(_peerId)
-                .set(fresh);
+            for (final code in {..._pairedRooms.keys, ?_roomId}) {
+              await _db.ref('rooms/$code/tokens/$_peerId').set(fresh);
+            }
           } catch (_) {}
         });
       }
@@ -283,7 +326,6 @@ class FirebaseService {
     _isPaired = false;
     _encryption.setRoomKey(code);
     _chatRef = roomRef.child('messages');
-    await registerFcmToken();
     return code;
   }
 
@@ -312,10 +354,77 @@ class FirebaseService {
     await roomRef.child('members').child(_peerId).set({
       'joinedAt': ServerValue.timestamp,
     });
-    await _saveState();
+    _pairedRooms.putIfAbsent(normalized, () => 'Paired contact');
+    await _saveState(strict: true);
+    try {
+      await _publishProfile();
+    } catch (_) {
+      /* Pairing remains valid if profile sync fails. */
+    }
     await registerFcmToken();
 
     return true;
+  }
+
+  /// Switching is only initiated from the directory, with no chat route open.
+  Future<void> selectRoom(String code) async {
+    if (!_pairedRooms.containsKey(code)) {
+      throw ArgumentError('Unknown paired room');
+    }
+    unawaited(updateOnlineStatus(false).catchError((_) {}));
+    _roomId = code;
+    _isPaired = true;
+    _encryption.setRoomKey(code);
+    _chatRef = Firebase.apps.isEmpty ? null : _db.ref('rooms/$code/messages');
+    await _saveState();
+  }
+
+  Future<void> saveProfile(Map<String, String> profile) async {
+    final name = (profile['name'] ?? '').trim();
+    if (name.isEmpty || name.length > 40) {
+      throw ArgumentError('Name must be 1–40 characters');
+    }
+    if ((profile['about'] ?? '').length > 140) {
+      throw ArgumentError('About must be at most 140 characters');
+    }
+    _profile = Map.of(profile)..['name'] = name;
+    await _saveState(strict: true);
+    await _publishProfile();
+  }
+
+  Future<void> _publishProfile() async {
+    if (Firebase.apps.isEmpty) return;
+    for (final room in _pairedRooms.keys.toList()) {
+      final cipher = EncryptionService.withPassphrase(room);
+      await _db
+          .ref('rooms/$room/profiles/$_peerId')
+          .set(cipher.encrypt(jsonEncode(_profile)));
+    }
+  }
+
+  Map<String, String> partnerProfile(String room, Object? rawProfiles) {
+    if (rawProfiles is! Map) return const {};
+    for (final entry in rawProfiles.entries) {
+      if (entry.key == _peerId || entry.value is! String) continue;
+      try {
+        final value = jsonDecode(
+          EncryptionService.withPassphrase(room).decrypt(entry.value),
+        );
+        if (value is Map) {
+          return value.map((k, v) => MapEntry(k.toString(), v.toString()));
+        }
+      } catch (_) {
+        /* Older clients may not have published a profile. */
+      }
+    }
+    return const {};
+  }
+
+  Stream<DatabaseEvent> roomStream(String room) {
+    if (Firebase.apps.isEmpty || !_pairedRooms.containsKey(room)) {
+      return const Stream.empty();
+    }
+    return _db.ref('rooms/$room').onValue;
   }
 
   DatabaseReference? _ensureChatRef() {
@@ -396,7 +505,24 @@ class FirebaseService {
   /// Ends or declines the active call in the current room.
   Future<void> endCall() async {
     if (_roomId == null || Firebase.apps.isEmpty) return;
-    await _db.ref().child('rooms').child(_roomId!).child('call').remove();
+    final room = _db.ref('rooms/$_roomId');
+    final snapshot = await room.child('call').get();
+    final call = snapshot.value;
+    if (call is! Map || call['startedAt'] is! int) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final connected = call['connectedAt'] as int?;
+    await room.update({
+      'call': null,
+      'messages/call_${call['startedAt']}': {
+        'senderId': call['callerId'],
+        'timestamp': now,
+        'seen': false,
+        'callType': call['type'],
+        'callSeconds': connected == null
+            ? null
+            : max(0, (now - connected) ~/ 1000),
+      },
+    });
   }
 
   /// Writes this peer's SDP (offer or answer) under `call/signal/{peerId}`.
