@@ -29,6 +29,62 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets(
+    'chat theme picker offers romantic palettes in light and dark mode',
+    (tester) async {
+      Future<void> chooseTheme(String themeName) async {
+        await tester.tap(find.byIcon(Icons.more_vert));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Chat Theme'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(themeName));
+        await tester.pumpAndSettle();
+      }
+
+      expect(
+        ChatThemePalette.darkPresets,
+        hasLength(ChatThemePalette.presets.length),
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(theme: messagingTheme, home: const ChatScreen()),
+      );
+      await tester.pump();
+      await tester.tap(find.byIcon(Icons.more_vert));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Chat Theme'));
+      await tester.pumpAndSettle();
+      for (final name in ['Rose Garden', 'Love Letter', 'Lavender Bloom']) {
+        expect(find.text(name), findsOneWidget);
+      }
+      await tester.tap(find.text('Love Letter'));
+      await tester.pumpAndSettle();
+      var scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
+      expect(
+        scaffold.backgroundColor,
+        ChatThemePalette.presets[2].backgroundColor,
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: messagingTheme,
+          darkTheme: messagingDarkTheme,
+          themeMode: ThemeMode.dark,
+          home: const ChatScreen(),
+        ),
+      );
+      await tester.pump();
+      await chooseTheme('Lavender Bloom');
+      scaffold = tester.widget<Scaffold>(find.byType(Scaffold).first);
+      expect(
+        scaffold.backgroundColor,
+        ChatThemePalette.darkPresets[3].backgroundColor,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('sticker search returns matching artwork and an empty state', (
     tester,
   ) async {

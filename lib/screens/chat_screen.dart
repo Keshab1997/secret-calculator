@@ -39,6 +39,16 @@ class ChatThemePalette {
     required this.accentColor,
   });
 
+  /// The night palette, paired with the matching light preset below.
+  static const ChatThemePalette dark = ChatThemePalette(
+    name: 'Classic Green',
+    appBarColor: Color(0xFF111B21),
+    backgroundColor: Color(0xFF0B141A),
+    myBubbleGradient: [Color(0xFF005C4B), Color(0xFF005C4B)],
+    partnerBubbleColor: Color(0xFF202C33),
+    accentColor: Color(0xFF25D366),
+  );
+
   static const List<ChatThemePalette> presets = [
     ChatThemePalette(
       name: 'Classic Green',
@@ -48,18 +58,61 @@ class ChatThemePalette {
       partnerBubbleColor: Colors.white,
       accentColor: Color(0xFF168B53),
     ),
+    ChatThemePalette(
+      name: 'Rose Garden',
+      appBarColor: Color(0xFFFFF7F8),
+      backgroundColor: Color(0xFFFFF0F3),
+      myBubbleGradient: [Color(0xFFFFD5E2), Color(0xFFFFC7D8)],
+      partnerBubbleColor: Color(0xFFFFFBFC),
+      accentColor: Color(0xFFC04868),
+    ),
+    ChatThemePalette(
+      name: 'Love Letter',
+      appBarColor: Color(0xFFFFF8F4),
+      backgroundColor: Color(0xFFFFF1E8),
+      myBubbleGradient: [Color(0xFFFFE0CB), Color(0xFFFFD1B5)],
+      partnerBubbleColor: Color(0xFFFFFCF8),
+      accentColor: Color(0xFFBC684B),
+    ),
+    ChatThemePalette(
+      name: 'Lavender Bloom',
+      appBarColor: Color(0xFFFAF7FF),
+      backgroundColor: Color(0xFFF2EEFF),
+      myBubbleGradient: [Color(0xFFE7D9FF), Color(0xFFDCC9FF)],
+      partnerBubbleColor: Color(0xFFFFFDFF),
+      accentColor: Color(0xFF7554AA),
+    ),
   ];
 
-  /// The night variant — WhatsApp's dark palette, applied automatically when
-  /// the app runs in dark mode.
-  static const ChatThemePalette dark = ChatThemePalette(
-    name: 'Classic Green (Dark)',
-    appBarColor: Color(0xFF111B21),
-    backgroundColor: Color(0xFF0B141A),
-    myBubbleGradient: [Color(0xFF005C4B), Color(0xFF005C4B)],
-    partnerBubbleColor: Color(0xFF202C33),
-    accentColor: Color(0xFF25D366),
-  );
+  /// Each light preset has a darker companion, so the picker still works in
+  /// dark mode without flashing a pastel chat surface.
+  static const List<ChatThemePalette> darkPresets = [
+    dark,
+    ChatThemePalette(
+      name: 'Rose Garden',
+      appBarColor: Color(0xFF2C1922),
+      backgroundColor: Color(0xFF1A1117),
+      myBubbleGradient: [Color(0xFF714354), Color(0xFF573143)],
+      partnerBubbleColor: Color(0xFF2A2028),
+      accentColor: Color(0xFFFF9EB8),
+    ),
+    ChatThemePalette(
+      name: 'Love Letter',
+      appBarColor: Color(0xFF2D211B),
+      backgroundColor: Color(0xFF1A1411),
+      myBubbleGradient: [Color(0xFF71503D), Color(0xFF5E402F)],
+      partnerBubbleColor: Color(0xFF2B231F),
+      accentColor: Color(0xFFFFC098),
+    ),
+    ChatThemePalette(
+      name: 'Lavender Bloom',
+      appBarColor: Color(0xFF241B32),
+      backgroundColor: Color(0xFF15121D),
+      myBubbleGradient: [Color(0xFF51406E), Color(0xFF403257)],
+      partnerBubbleColor: Color(0xFF27222F),
+      accentColor: Color(0xFFC6AAFF),
+    ),
+  ];
 }
 
 class ChatScreen extends StatefulWidget {
@@ -153,9 +206,9 @@ class _ChatScreenState extends State<ChatScreen>
     '🙏',
   ];
 
-  ChatThemePalette get _theme => MessagingPalette.isDark(context)
-      ? ChatThemePalette.dark
-      : ChatThemePalette.presets[_selectedThemeIndex];
+  ChatThemePalette get _theme => (MessagingPalette.isDark(context)
+      ? ChatThemePalette.darkPresets
+      : ChatThemePalette.presets)[_selectedThemeIndex];
 
   /// Text colours resolved against the active theme — dark mode flips these.
   Color get _ink => MessagingPalette.of(context).ink;
@@ -1156,9 +1209,13 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _showThemePicker() {
+    final darkMode = MessagingPalette.isDark(context);
+    final themes = darkMode
+        ? ChatThemePalette.darkPresets
+        : ChatThemePalette.presets;
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: darkMode ? const Color(0xFF1F2C33) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -1177,8 +1234,8 @@ class _ChatScreenState extends State<ChatScreen>
                   style: Theme.of(sheetContext).textTheme.titleLarge,
                 ),
               ),
-              ...List.generate(ChatThemePalette.presets.length, (index) {
-                final item = ChatThemePalette.presets[index];
+              ...List.generate(themes.length, (index) {
+                final item = themes[index];
                 final isSelected = index == _selectedThemeIndex;
                 return InkWell(
                   onTap: () {
@@ -1196,13 +1253,49 @@ class _ChatScreenState extends State<ChatScreen>
                     child: Row(
                       children: [
                         Container(
-                          width: 40,
-                          height: 40,
+                          width: 54,
+                          height: 42,
+                          padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: item.myBubbleGradient,
+                            color: item.backgroundColor,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: item.accentColor.withValues(alpha: 0.24),
                             ),
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: Container(
+                                  width: 22,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: item.myBubbleGradient,
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                ),
+                              ),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: Container(
+                                  width: 18,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: item.partnerBubbleColor,
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: item.accentColor.withValues(
+                                        alpha: 0.14,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -1211,12 +1304,12 @@ class _ChatScreenState extends State<ChatScreen>
                             item.name,
                             style: Theme.of(sheetContext).textTheme.titleMedium
                                 ?.copyWith(
-                                  color: isSelected ? chatGreen : _ink,
+                                  color: isSelected ? item.accentColor : _ink,
                                 ),
                           ),
                         ),
                         if (isSelected)
-                          const Icon(Icons.check_circle, color: chatGreen),
+                          Icon(Icons.check_circle, color: item.accentColor),
                       ],
                     ),
                   ),
