@@ -1333,7 +1333,15 @@ class _ChatScreenState extends State<ChatScreen>
                     children: [
                       Stack(
                         children: [
-                          ProfileAvatar(photo: widget.contactPhoto, radius: 20),
+                          // The list's avatar flies into this one (see the
+                          // matching Hero on the chat rows).
+                          Hero(
+                            tag: 'chat-avatar-${_firebase.getShortCode()}',
+                            child: ProfileAvatar(
+                              photo: widget.contactPhoto,
+                              radius: 20,
+                            ),
+                          ),
                           Positioned(
                             right: 0,
                             bottom: 0,

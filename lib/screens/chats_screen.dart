@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/encryption_service.dart';
 import '../services/firebase_service.dart';
@@ -18,7 +19,8 @@ class ChatsScreen extends StatefulWidget {
   State<ChatsScreen> createState() => _ChatsScreenState();
 }
 
-class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
+class _ChatsScreenState extends State<ChatsScreen>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   final _service = FirebaseService();
   final Map<String, List<StreamSubscription<DatabaseEvent>>> _subscriptions =
       {};
@@ -28,10 +30,19 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
   int _tab = 0;
   bool _opening = false;
 
+  /// Drives the one-time settle-in of the list rows; finished after the first
+  /// appearance, so later rebuilds (a new message, coming back from a chat)
+  /// never replay it.
+  late final AnimationController _intro;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _intro = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 620),
+    )..forward();
     if (!widget.decoyMode) {
       _subscribe();
     }
@@ -116,6 +127,7 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
         sub.cancel();
       }
     }
+    _intro.dispose();
     super.dispose();
   }
 
@@ -329,6 +341,14 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
                                 'Your private conversations',
                                 'Pair a device to start chatting. Your contacts appear here.',
                                 Icons.forum_outlined,
+                                action: FilledButton.icon(
+                                  onPressed: _pair,
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: chatGreen,
+                                  ),
+                                  icon: const Icon(Icons.add_comment_outlined),
+                                  label: const Text('Pair a device'),
+                                ),
                               )
                             : ListView.builder(
                                 itemCount: codes.length,
@@ -346,70 +366,78 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
                                             m['seen'] != true,
                                       )
                                       .length;
-                                  return ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
-                                    leading: ProfileAvatar(
-                                      photo: profile['photo'],
-                                    ),
-                                    title: Text(
-                                      profile['name'] ?? 'Paired contact',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 18),
-                                    ),
-                                    subtitle: Text(
-                                      messages.isEmpty
-                                          ? 'Say hello'
-                                          : _preview(code, messages.first),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    trailing: Column(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        Text(
-                                          messages.isEmpty
-                                              ? ''
-                                              : _time(
-                                                  messages.first['timestamp'],
-                                                ),
-                                          style: TextStyle(
-                                            fontSize: 11,
-                                            color: unread > 0
-                                                ? chatGreen
-                                                : Colors.grey,
+                                  return _staggered(
+                                    index,
+                                    ListTile(
+                                      contentPadding:
+                                          const EdgeInsets.symmetric(
+                                            horizontal: 16,
+                                            vertical: 8,
                                           ),
+                                      leading: Hero(
+                                        tag: 'chat-avatar-$code',
+                                        child: ProfileAvatar(
+                                          photo: profile['photo'],
                                         ),
-                                        const SizedBox(height: 5),
-                                        if (unread > 0)
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 7,
-                                              vertical: 3,
-                                            ),
-                                            decoration: const BoxDecoration(
-                                              color: chatGreen,
-                                              borderRadius: BorderRadius.all(
-                                                Radius.circular(20),
-                                              ),
-                                            ),
-                                            child: Text(
-                                              '$unread',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 11,
-                                              ),
+                                      ),
+                                      title: Text(
+                                        profile['name'] ?? 'Paired contact',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 18),
+                                      ),
+                                      subtitle: Text(
+                                        messages.isEmpty
+                                            ? 'Say hello'
+                                            : _preview(code, messages.first),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      trailing: Column(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.end,
+                                        children: [
+                                          Text(
+                                            messages.isEmpty
+                                                ? ''
+                                                : _time(
+                                                    messages.first['timestamp'],
+                                                  ),
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: unread > 0
+                                                  ? chatGreen
+                                                  : Colors.grey,
                                             ),
                                           ),
-                                      ],
+                                          const SizedBox(height: 5),
+                                          if (unread > 0)
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 7,
+                                                    vertical: 3,
+                                                  ),
+                                              decoration: const BoxDecoration(
+                                                color: chatGreen,
+                                                borderRadius: BorderRadius.all(
+                                                  Radius.circular(20),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                '$unread',
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      onTap: () => _open(code),
                                     ),
-                                    onTap: () => _open(code),
                                   );
                                 },
                               )
@@ -428,21 +456,26 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
                               code,
                               _rooms[code]?['profiles'],
                             );
-                            return ListTile(
-                              leading: ProfileAvatar(photo: profile['photo']),
-                              title: Text(profile['name'] ?? 'Paired contact'),
-                              subtitle: Text(
-                                '${_preview(code, message)} · ${_time(message['timestamp'])}',
-                              ),
-                              trailing: Icon(
-                                message['callType'] == 'video'
-                                    ? Icons.videocam_outlined
-                                    : Icons.call_outlined,
-                                color: chatGreen,
-                              ),
-                              onTap: () => _open(
-                                code,
-                                video: message['callType'] == 'video',
+                            return _staggered(
+                              index,
+                              ListTile(
+                                leading: ProfileAvatar(photo: profile['photo']),
+                                title: Text(
+                                  profile['name'] ?? 'Paired contact',
+                                ),
+                                subtitle: Text(
+                                  '${_preview(code, message)} · ${_time(message['timestamp'])}',
+                                ),
+                                trailing: Icon(
+                                  message['callType'] == 'video'
+                                      ? Icons.videocam_outlined
+                                      : Icons.call_outlined,
+                                  color: chatGreen,
+                                ),
+                                onTap: () => _open(
+                                  code,
+                                  video: message['callType'] == 'video',
+                                ),
                               ),
                             );
                           },
@@ -463,7 +496,10 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
         selectedIndex: _tab,
         backgroundColor: Colors.white,
         indicatorColor: const Color(0xFFD9FDD3),
-        onDestinationSelected: (index) => setState(() => _tab = index),
+        onDestinationSelected: (index) {
+          if (index != _tab) HapticFeedback.selectionClick();
+          setState(() => _tab = index);
+        },
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.chat_bubble_outline),
@@ -485,24 +521,71 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _empty(String title, String subtitle, IconData icon) => Center(
+  /// Rows settle in one after another on the list's first appearance. The
+  /// offset grows with the index, so the cascade reads as one gesture rather
+  /// than a list that is still loading.
+  Widget _staggered(int index, Widget child) {
+    if (index > 9) return child;
+    final start = (index * 0.06).clamp(0.0, 0.55);
+    final curved = CurvedAnimation(
+      parent: _intro,
+      curve: Interval(
+        start,
+        (start + 0.45).clamp(0.0, 1.0),
+        curve: Curves.easeOutCubic,
+      ),
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.06),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
+    );
+  }
+
+  /// The empty state: a soft badge, the explanation, and — where there is
+  /// something to do about it — the action itself instead of a dead end.
+  Widget _empty(
+    String title,
+    String subtitle,
+    IconData icon, {
+    Widget? action,
+  }) => Center(
     child: Padding(
       padding: const EdgeInsets.all(32),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 54, color: chatGreen),
-          const SizedBox(height: 20),
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: chatGreen.withValues(alpha: 0.08),
+            ),
+            child: Icon(icon, size: 42, color: chatGreen),
+          ),
+          const SizedBox(height: 22),
           Text(
             title,
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w600),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
             subtitle,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.grey),
+            style: TextStyle(
+              color: Colors.grey[600],
+              fontSize: 13.5,
+              height: 1.35,
+            ),
           ),
+          if (action != null) ...[const SizedBox(height: 22), action],
         ],
       ),
     ),
