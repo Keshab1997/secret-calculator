@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -106,6 +107,10 @@ class _ChatScreenState extends State<ChatScreen>
   int _selectedThemeIndex = 0;
   int? _disappearingSeconds;
   ChatMessage? _replyingTo;
+
+  /// Messages this phone is still sending, drawn at the end of the list until
+  /// the room echoes them back.
+  final List<_PendingSend> _outgoing = [];
 
   bool _isRecordingVoice = false;
   int _recordingSeconds = 0;
@@ -694,7 +699,6 @@ class _ChatScreenState extends State<ChatScreen>
     int? audioDurationSeconds,
   }) async {
     if (!mounted) return;
-    final sendingRoom = _firebase.getShortCode();
     if (text == null && image == null && audioBase64 == null) return;
     if (text != null &&
         text.trim().isEmpty &&
@@ -703,45 +707,108 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final replyTarget = _replyingTo;
+    // The bubble appears before the network is touched: the photo shows up in
+    // the conversation while it uploads, carries its own progress, and its own
+    // failure with a retry. A send never vanishes into a snackbar.
+    final pending = _PendingSend(
+      id: 'local-${DateTime.now().microsecondsSinceEpoch}',
+      text: text?.trim(),
+      image: image,
+      audioBase64: audioBase64,
+      audioDurationSeconds: audioDurationSeconds,
+      replyTarget: _replyingTo,
+    );
     setState(() {
       _replyingTo = null;
+      _outgoing.add(pending);
     });
+    _messageController.clear();
     _typingDebounce?.cancel();
     _firebase.updateTypingStatus(false);
+    _scrollToBottom();
+    await _flushPending(pending);
+  }
 
-    String? imageUrl;
-    if (image != null) {
-      imageUrl = await _firebase.uploadImage(image);
-      if (imageUrl == null) {
-        // Storage rejected the upload (rules/size/network). Never push an
-        // empty message — tell the user instead.
-        _showErrorSnack('Image upload failed');
+  Future<void> _flushPending(_PendingSend pending) async {
+    final sendingRoom = _firebase.getShortCode();
+    try {
+      String? imageUrl;
+      if (pending.image != null) {
+        if (mounted) setState(() => pending.progress = 0);
+        imageUrl = await _firebase.uploadImage(
+          pending.image!,
+          onProgress: (value) {
+            if (!mounted) return;
+            setState(() => pending.progress = value);
+          },
+        );
+      }
+      if (!mounted) return;
+      if (sendingRoom != _firebase.getShortCode()) {
+        // The user moved to another room mid-send; drop it quietly rather
+        // than posting it into the wrong conversation.
+        _removePending(pending);
         return;
       }
-    }
-
-    if (!mounted || sendingRoom != _firebase.getShortCode()) return;
-    try {
+      final reply = pending.replyTarget;
       await _firebase.sendMessage(
-        text?.trim() ?? '',
+        pending.text ?? '',
         imageUrl: imageUrl,
-        audioBase64: audioBase64,
-        audioDurationSeconds: audioDurationSeconds,
+        audioBase64: pending.audioBase64,
+        audioDurationSeconds: pending.audioDurationSeconds,
         replyToText:
-            replyTarget?.text ??
-            (replyTarget?.imageUrl != null ? '📷 Photo' : null),
-        replyToSenderId: replyTarget != null
-            ? (replyTarget.isMe ? _firebase.myPeerId : 'partner')
-            : null,
+            reply?.text ?? (reply?.imageUrl != null ? '📷 Photo' : null),
+        replyToSenderId: reply == null
+            ? null
+            : (reply.isMe ? _firebase.myPeerId : 'partner'),
         expiresInSeconds: _disappearingSeconds,
       );
       if (!mounted) return;
-      _messageController.clear();
-      setState(() {});
-    } catch (_) {
-      _showErrorSnack('Message could not be sent. Please try again.');
+      _removePending(pending);
+    } catch (e) {
+      // The console line is for `flutter run`; the bubble is for the phone.
+      debugPrint('send failed: $e');
+      if (!mounted) return;
+      setState(() {
+        pending.progress = null;
+        pending.error = _sendFailureReason(e);
+      });
+      HapticFeedback.mediumImpact();
     }
+  }
+
+  Future<void> _retryPending(_PendingSend pending) async {
+    HapticFeedback.selectionClick();
+    setState(() {
+      pending.error = null;
+      pending.progress = 0;
+    });
+    await _flushPending(pending);
+  }
+
+  void _removePending(_PendingSend pending) {
+    if (!mounted) return;
+    setState(() => _outgoing.removeWhere((p) => p.id == pending.id));
+  }
+
+  /// Names the step that actually failed. "Could not be sent" is true and
+  /// useless: an upload that Storage refused and a message the room's rules
+  /// rejected need different fixes.
+  String _sendFailureReason(Object error) {
+    if (error is MediaUploadException) return error.message;
+    if (error is FirebaseException) {
+      switch (error.code) {
+        case 'permission-denied':
+          return 'The room refused this message (permission denied).';
+        case 'network-request-failed':
+          return 'No connection — tap to retry.';
+        case 'unavailable':
+          return 'The database is unreachable right now.';
+        default:
+          return 'Send failed (${error.code}).';
+      }
+    }
+    return 'Message could not be sent. Please try again.';
   }
 
   void _showErrorSnack(String message) {
@@ -1499,7 +1566,7 @@ class _ChatScreenState extends State<ChatScreen>
           child: Column(
             children: [
               Expanded(
-                child: displayedMessages.isEmpty
+                child: displayedMessages.isEmpty && _outgoing.isEmpty
                     ? Center(
                         child: Padding(
                           padding: const EdgeInsets.all(32),
@@ -1552,8 +1619,13 @@ class _ChatScreenState extends State<ChatScreen>
                           horizontal: 14,
                           vertical: 12,
                         ),
-                        itemCount: displayedMessages.length,
+                        itemCount: displayedMessages.length + _outgoing.length,
                         itemBuilder: (context, index) {
+                          if (index >= displayedMessages.length) {
+                            return _buildPendingBubble(
+                              _outgoing[index - displayedMessages.length],
+                            );
+                          }
                           final message = displayedMessages[index];
                           final prevMessage = index > 0
                               ? displayedMessages[index - 1]
@@ -1862,6 +1934,155 @@ class _ChatScreenState extends State<ChatScreen>
         child: Text(
           label,
           style: TextStyle(fontSize: 11, color: Colors.grey[600]),
+        ),
+      ),
+    );
+  }
+
+  /// The bubble for a message that is still on its way out: the photo (or the
+  /// text) is already in the conversation, with a progress ring while it
+  /// uploads and its own retry when it fails.
+  Widget _buildPendingBubble(_PendingSend pending) {
+    final failed = pending.error != null;
+    final uploading = !failed && pending.progress != null;
+    final progress = pending.progress ?? 0;
+
+    return Align(
+      alignment: Alignment.centerRight,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 4),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        decoration: BoxDecoration(
+          color: failed
+              ? const Color(0xFFFFE9E7)
+              : _theme.myBubbleGradient.first.withValues(alpha: 0.4),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 4,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (pending.image != null)
+                Container(
+                  width: 150,
+                  height: 150,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Center(
+                    child: failed
+                        ? const Icon(
+                            Icons.image_not_supported_outlined,
+                            color: Colors.white70,
+                          )
+                        : Text(
+                            '${(progress * 100).round()}%',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                  ),
+                ),
+              if (pending.image != null &&
+                  pending.text != null &&
+                  pending.text!.isNotEmpty)
+                const SizedBox(height: 6),
+              if (pending.text != null && pending.text!.isNotEmpty)
+                Text(
+                  pending.text!,
+                  style: const TextStyle(fontSize: 15, color: chatInk),
+                ),
+              if (pending.audioBase64 != null)
+                const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.mic, size: 16, color: chatInk),
+                    SizedBox(width: 6),
+                    Text('Voice message', style: TextStyle(fontSize: 15)),
+                  ],
+                ),
+              const SizedBox(height: 6),
+              if (failed)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.error_outline,
+                      size: 15,
+                      color: Color(0xFFD64541),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        pending.error!,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: Color(0xFFD64541),
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => _retryPending(pending),
+                      style: TextButton.styleFrom(
+                        minimumSize: const Size(0, 30),
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                      ),
+                      child: const Text(
+                        'Retry',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: chatGreen,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Discard',
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 16,
+                      icon: const Icon(Icons.close, color: Colors.black38),
+                      onPressed: () => _removePending(pending),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: chatInk.withValues(alpha: 0.55),
+                        value: uploading ? progress : null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      uploading ? 'Uploading photo…' : 'Sending…',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: chatInk.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -2225,6 +2446,32 @@ class _TypingDotsState extends State<_TypingDots>
       ),
     );
   }
+}
+
+/// One message still on its way out. Mutable on purpose: the same bubble is
+/// updated with upload progress, then with the failure and its reason.
+class _PendingSend {
+  _PendingSend({
+    required this.id,
+    this.text,
+    this.image,
+    this.audioBase64,
+    this.audioDurationSeconds,
+    this.replyTarget,
+  });
+
+  final String id;
+  final String? text;
+  final File? image;
+  final String? audioBase64;
+  final int? audioDurationSeconds;
+  final ChatMessage? replyTarget;
+
+  /// Upload progress 0..1 while a photo is moving; null once it is queued.
+  double? progress;
+
+  /// Set when the send failed, with a reason worth reading.
+  String? error;
 }
 
 class ChatMessage {

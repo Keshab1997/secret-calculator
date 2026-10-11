@@ -13,6 +13,17 @@ import 'package:path_provider/path_provider.dart';
 import 'encryption_service.dart';
 import 'media_cache_service.dart';
 
+/// A photo upload that failed with a reason worth showing the person who
+/// sent it.
+class MediaUploadException implements Exception {
+  final String message;
+
+  const MediaUploadException(this.message);
+
+  @override
+  String toString() => message;
+}
+
 class FirebaseService {
   static final FirebaseService _instance = FirebaseService._internal();
   factory FirebaseService() => _instance;
@@ -60,6 +71,12 @@ class FirebaseService {
   bool _biometricEnabled = false;
   int? _disappearingSeconds;
   final EncryptionService _encryption = EncryptionService();
+
+  /// When set, the next [sendMessage] throws this instead of writing: the
+  /// failure bubble and its retry need a testable seam, and this is the
+  /// smallest one.
+  @visibleForTesting
+  Object? nextSendError;
 
   /// Unique per-install/session peer identifier used as `senderId` and status key.
   String get peerId => _peerId;
@@ -570,6 +587,11 @@ class FirebaseService {
     String? replyToSenderId,
     int? expiresInSeconds,
   }) async {
+    final injected = nextSendError;
+    if (injected != null) {
+      nextSendError = null;
+      throw injected;
+    }
     final chatRef = _ensureChatRef();
     if (chatRef == null) return;
 
@@ -849,24 +871,65 @@ class FirebaseService {
   }
 
   // Upload image to Firebase Storage
-  Future<String?> uploadImage(File imageFile) async {
+  /// Uploads [imageFile] and returns its download URL.
+  ///
+  /// Reports progress (0..1) while the bytes move, and throws
+  /// [MediaUploadException] with a reason instead of returning null: "the
+  /// photo did not upload" and "the message did not save" are different
+  /// problems with different fixes, and a chat screen that blurs them into
+  /// one message cannot be diagnosed from a phone.
+  Future<String> uploadImage(
+    File imageFile, {
+    void Function(double progress)? onProgress,
+  }) async {
+    final roomSegment = _roomId ?? 'unassigned';
+    final fileName =
+        'images/$roomSegment/${DateTime.now().millisecondsSinceEpoch}.jpg';
     try {
-      final roomSegment = _roomId ?? 'unassigned';
-      final fileName =
-          'images/$roomSegment/${DateTime.now().millisecondsSinceEpoch}.jpg';
       final ref = FirebaseStorage.instance.ref().child(fileName);
       // Explicit content type: storage.rules only allows `image/*`, and
       // putFile without metadata may send none (depends on platform file
       // extension guessing) — which the rule would reject.
-      await ref.putFile(imageFile, SettableMetadata(contentType: 'image/jpeg'));
+      final task = ref.putFile(
+        imageFile,
+        SettableMetadata(contentType: 'image/jpeg'),
+      );
+      if (onProgress != null) {
+        task.snapshotEvents.listen((snapshot) {
+          final total = snapshot.totalBytes;
+          if (total > 0) onProgress(snapshot.bytesTransferred / total);
+        });
+      }
+      await task;
       final downloadUrl = await ref.getDownloadURL();
-      await MediaCacheService().seedCachedImage(downloadUrl, imageFile);
+      // Warming the local cache is a convenience; never let it fail a send.
+      try {
+        await MediaCacheService().seedCachedImage(downloadUrl, imageFile);
+      } catch (_) {}
       return downloadUrl;
+    } on FirebaseException catch (e) {
+      debugPrint('uploadImage failed: ${e.code} ${e.message}');
+      throw MediaUploadException(_uploadReason(e.code));
     } catch (e) {
-      // Surfaced in `flutter run` console so upload failures are diagnosable
-      // instead of silently returning null.
       debugPrint('uploadImage failed: $e');
-      return null;
+      throw const MediaUploadException('The photo could not be uploaded.');
+    }
+  }
+
+  /// Turns a Storage error code into something a person can act on.
+  static String _uploadReason(String code) {
+    switch (code) {
+      case 'unauthorized':
+      case 'permission-denied':
+        return 'Storage refused the photo — the storage rules need updating.';
+      case 'canceled':
+        return 'The photo upload was cancelled.';
+      case 'quota-exceeded':
+        return 'Storage is full.';
+      case 'retry-limit-exceeded':
+        return 'The upload kept failing — check your connection.';
+      default:
+        return 'The photo could not be uploaded ($code).';
     }
   }
 
