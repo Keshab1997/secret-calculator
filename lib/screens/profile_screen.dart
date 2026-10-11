@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../services/firebase_service.dart';
 import '../widgets/messaging_style.dart';
+import '../widgets/security_settings.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -97,87 +98,217 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// One section of the profile, on a soft card so the settings read as
+  /// groups instead of a single page of loose fields.
+  Widget _card({required Widget child}) => Container(
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: const Color(0xFFF7F8FA),
+      borderRadius: BorderRadius.circular(18),
+      border: Border.all(color: const Color(0xFFE7E9EE)),
+    ),
+    child: child,
+  );
+
+  Widget _sectionLabel(String text) => Padding(
+    padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+    child: Text(
+      text.toUpperCase(),
+      style: const TextStyle(
+        fontSize: 11,
+        letterSpacing: 0.8,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF8A919E),
+      ),
+    ),
+  );
+
+  Widget _tile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(12),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: chatGreen.withValues(alpha: 0.10),
+            ),
+            child: Icon(icon, size: 20, color: chatGreen),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: TextStyle(fontSize: 12.5, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+          ),
+          Icon(Icons.chevron_right, size: 20, color: Colors.grey[400]),
+        ],
+      ),
+    ),
+  );
+
+  InputDecoration _fieldDecoration(String label, IconData icon) =>
+      InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 20),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: Color(0xFFE7E9EE)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: chatGreen, width: 1.4),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 36),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Center(
-          child: Stack(
+        _card(
+          child: Column(
             children: [
-              ProfileAvatar(photo: _photo, radius: 58),
-              Positioned(
-                bottom: 0,
-                right: 0,
-                child: IconButton.filled(
-                  style: IconButton.styleFrom(backgroundColor: chatGreen),
-                  tooltip: 'Change profile photo',
-                  onPressed: _saving ? null : _pickPhoto,
-                  icon: const Icon(Icons.camera_alt),
+              Center(
+                child: Stack(
+                  children: [
+                    ProfileAvatar(photo: _photo, radius: 52),
+                    Positioned(
+                      bottom: 0,
+                      right: 0,
+                      child: IconButton.filled(
+                        style: IconButton.styleFrom(backgroundColor: chatGreen),
+                        tooltip: 'Change profile photo',
+                        onPressed: _saving ? null : _pickPhoto,
+                        icon: const Icon(Icons.camera_alt),
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+              if (_photo != null)
+                TextButton(
+                  onPressed: _saving
+                      ? null
+                      : () => setState(() => _photo = null),
+                  child: const Text('Remove photo'),
+                ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _name,
+                enabled: !_saving,
+                maxLength: 40,
+                decoration: _fieldDecoration('Name', Icons.person_outline),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _about,
+                enabled: !_saving,
+                maxLength: 140,
+                maxLines: 2,
+                decoration: _fieldDecoration('About', Icons.info_outline),
               ),
             ],
           ),
         ),
-        if (_photo != null)
-          TextButton(
-            onPressed: _saving ? null : () => setState(() => _photo = null),
-            child: const Text('Remove photo'),
-          ),
-        const SizedBox(height: 28),
-        TextField(
-          controller: _name,
-          enabled: !_saving,
-          maxLength: 40,
-          decoration: const InputDecoration(
-            labelText: 'Name',
-            prefixIcon: Icon(Icons.person_outline),
+        const SizedBox(height: 20),
+        _sectionLabel('Privacy & security'),
+        _card(
+          child: Column(
+            children: [
+              _tile(
+                icon: Icons.fingerprint,
+                title: 'Passcode & Biometric Lock',
+                subtitle: 'Change your secret code and the unlock prompt',
+                onTap: _saving
+                    ? () {}
+                    : () => showSecuritySettingsSheet(context),
+              ),
+              const Divider(height: 20),
+              TextField(
+                controller: _decoyCode,
+                enabled: !_saving,
+                maxLength: 8,
+                keyboardType: TextInputType.number,
+                decoration:
+                    _fieldDecoration(
+                      'Decoy passcode (optional, 4–8 digits)',
+                      Icons.shield_outlined,
+                    ).copyWith(
+                      helperText: 'Opens an empty chat list if someone forces you to unlock',
+                      helperStyle: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+              ),
+            ],
           ),
         ),
         const SizedBox(height: 20),
-        TextField(
-          controller: _about,
-          enabled: !_saving,
-          maxLength: 140,
-          maxLines: 2,
-          decoration: const InputDecoration(
-            labelText: 'About',
-            prefixIcon: Icon(Icons.info_outline),
+        _sectionLabel('Sharing'),
+        _card(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Your profile is shared with paired contacts. The calculator name and icon on your phone do not change.',
+                style: TextStyle(
+                  color: Colors.black54,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'To invite someone, open Chats → Pair new contact. Each conversation has its own pairing code. Unpair a contact from that chat\'s menu.',
+                style: TextStyle(fontSize: 13, height: 1.35),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: 20),
-        TextField(
-          controller: _decoyCode,
-          enabled: !_saving,
-          maxLength: 8,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Decoy passcode (optional, 4–8 digits)',
-            helperText:
-                'Opens an empty chat list if someone forces you to unlock',
-            prefixIcon: Icon(Icons.shield_outlined),
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text(
-          'Your profile is shared with paired contacts. The calculator name and icon on your phone do not change.',
-          style: TextStyle(color: Colors.grey, fontSize: 13),
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'To invite someone, open Chats → Pair new contact. Each conversation has its own pairing code.',
-          style: TextStyle(fontSize: 13),
         ),
         if (_error != null)
           Padding(
-            padding: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.only(top: 14),
             child: Text(_error!, style: const TextStyle(color: Colors.red)),
           ),
         const SizedBox(height: 24),
         FilledButton(
           onPressed: _saving ? null : _save,
-          style: FilledButton.styleFrom(backgroundColor: chatGreen),
+          style: FilledButton.styleFrom(
+            backgroundColor: chatGreen,
+            minimumSize: const Size.fromHeight(52),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
+          ),
           child: Text(_saving ? 'Saving…' : 'Save profile'),
         ),
       ],

@@ -13,6 +13,7 @@ import '../services/media_cache_service.dart';
 import '../services/native_bridge_service.dart';
 import '../services/notification_service.dart';
 import '../widgets/emoji_keyboard.dart';
+import '../widgets/option_sheet.dart';
 import '../widgets/sticker_keyboard.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/sticker_art.dart';
@@ -849,99 +850,109 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  void _showSecuritySettingsDialog() {
-    final codeCtrl = TextEditingController(text: _firebase.customPasscode);
-    var bioEnabled = _firebase.biometricEnabled;
-    String? localError;
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: _theme.appBarColor,
-          title: const Row(
-            children: [
-              Icon(Icons.fingerprint, color: Colors.greenAccent),
-              SizedBox(width: 8),
-              Flexible(child: Text('Passcode & Biometric Lock')),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Custom Secret Calculator Code (4–8 digits):',
-                style: TextStyle(fontSize: 13, color: Colors.black54),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: codeCtrl,
-                keyboardType: TextInputType.number,
-                maxLength: 8,
-                style: const TextStyle(
-                  color: chatInk,
-                  fontSize: 20,
-                  letterSpacing: 4,
-                  fontWeight: FontWeight.bold,
-                ),
-                decoration: InputDecoration(
-                  hintText: '1997',
-                  filled: true,
-                  fillColor: _theme.backgroundColor,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  errorText: localError,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Fingerprint / Screen Lock'),
-                subtitle: const Text(
-                  'Ask for device fingerprint before opening Secret Chat',
-                  style: TextStyle(fontSize: 12),
-                ),
-                value: bioEnabled,
-                onChanged: (val) {
-                  setDialogState(() => bioEnabled = val);
-                },
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('CANCEL'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final ok = await _firebase.setCustomPasscode(codeCtrl.text);
-                if (!ok) {
-                  setDialogState(() {
-                    localError = 'Enter 4 to 8 digits (0-9)';
-                  });
-                  return;
-                }
-                await _firebase.setBiometricEnabled(bioEnabled);
-                if (!dialogContext.mounted) return;
-                Navigator.pop(dialogContext);
-                if (!mounted) return;
-                ScaffoldMessenger.of(this.context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      'Saved! Passcode: ${_firebase.customPasscode} • Biometric: ${bioEnabled ? "ON" : "OFF"}',
-                    ),
-                  ),
-                );
-              },
-              child: const Text('SAVE'),
-            ),
-          ],
+  /// The chat's overflow menu: everything that acts on *this* conversation,
+  /// and nothing that is really a device setting — those live on the profile
+  /// (see `showSecuritySettingsSheet`).
+  Future<void> _showChatOptions() async {
+    final value = await showOptionSheet(
+      context,
+      title: widget.contactName,
+      subtitle: 'Options for this secret conversation',
+      items: [
+        const OptionSheetItem(
+          value: 'hide',
+          icon: Icons.calculate_outlined,
+          label: 'Quick Hide to Calculator',
         ),
-      ),
+        const OptionSheetItem(
+          value: 'search',
+          icon: Icons.search,
+          label: 'Search Messages',
+        ),
+        OptionSheetItem(
+          value: 'room_info',
+          icon: Icons.verified_user_outlined,
+          label: 'Room: ${_firebase.getShortCode()}',
+          subtitle: 'Secret room pairing code',
+        ),
+        const OptionSheetItem(
+          value: 'theme',
+          icon: Icons.palette_outlined,
+          label: 'Chat Theme',
+          subtitle: 'Wallpaper and bubble colours',
+        ),
+        OptionSheetItem(
+          value: 'disappearing',
+          icon: Icons.timer_outlined,
+          label: 'Disappearing messages',
+          subtitle: _disappearingSeconds == null
+              ? 'Off'
+              : 'Clears after ${_formatDisappearing(_disappearingSeconds!)}',
+        ),
+        const OptionSheetItem(
+          value: 'clear',
+          icon: Icons.cleaning_services_outlined,
+          label: 'Clear chat history',
+          destructive: true,
+        ),
+        const OptionSheetItem(
+          value: 're_pair',
+          icon: Icons.link_off,
+          label: 'Unpair this contact',
+          destructive: true,
+        ),
+      ],
     );
+    if (value == null || !mounted) return;
+    switch (value) {
+      case 'hide':
+        _quickHide();
+        break;
+      case 'search':
+        setState(() {
+          _isSearching = !_isSearching;
+          _searchQuery = '';
+          _searchController.clear();
+        });
+        break;
+      case 'room_info':
+        _showRoomInfoDialog();
+        break;
+      case 'theme':
+        _showThemePicker();
+        break;
+      case 'disappearing':
+        _showDisappearingOptions();
+        break;
+      case 'clear':
+        await _confirmClearChat();
+        break;
+      case 're_pair':
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Unpair this contact?'),
+            content: const Text(
+              'This removes the contact from this device. Shared message history is not deleted.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Unpair'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true) return;
+        await _firebase.leaveRoom();
+        if (!mounted) return;
+        Navigator.pop(context);
+        break;
+    }
   }
 
   void _showMessageActions(ChatMessage message) {
@@ -1429,95 +1440,10 @@ class _ChatScreenState extends State<ChatScreen>
               icon: const Icon(Icons.call_outlined),
               onPressed: _showCallOptions,
             ),
-            PopupMenuButton<String>(
+            IconButton(
+              tooltip: 'More options',
               icon: const Icon(Icons.more_vert),
-              color: _theme.appBarColor,
-              onSelected: (value) async {
-                switch (value) {
-                  case 'hide':
-                    _quickHide();
-                    break;
-                  case 'search':
-                    setState(() {
-                      _isSearching = !_isSearching;
-                      _searchQuery = '';
-                      _searchController.clear();
-                    });
-                    break;
-                  case 'room_info':
-                    _showRoomInfoDialog();
-                    break;
-                  case 'security':
-                    _showSecuritySettingsDialog();
-                    break;
-                  case 'theme':
-                    _showThemePicker();
-                    break;
-                  case 'disappearing':
-                    _showDisappearingOptions();
-                    break;
-                  case 'clear':
-                    await _confirmClearChat();
-                    break;
-                  case 're_pair':
-                    final confirmed = await showDialog<bool>(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('Unpair this contact?'),
-                        content: const Text(
-                          'This removes the contact from this device. Shared message history is not deleted.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, false),
-                            child: const Text('Cancel'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx, true),
-                            child: const Text('Unpair'),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirmed != true) return;
-                    await _firebase.leaveRoom();
-                    if (context.mounted) Navigator.pop(context);
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'hide',
-                  child: Text('Quick Hide to Calculator'),
-                ),
-                const PopupMenuItem(
-                  value: 'search',
-                  child: Text('Search Messages'),
-                ),
-                PopupMenuItem(
-                  value: 'room_info',
-                  child: Text('Room: ${_firebase.getShortCode()}'),
-                ),
-                const PopupMenuItem(
-                  value: 'security',
-                  child: Text('Passcode & Bio Lock'),
-                ),
-                const PopupMenuItem(value: 'theme', child: Text('Chat Theme')),
-                PopupMenuItem(
-                  value: 'disappearing',
-                  child: Text(
-                    'Disappearing: ${_disappearingSeconds == null ? 'Off' : _formatDisappearing(_disappearingSeconds!)}',
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'clear',
-                  child: Text('Clear chat history'),
-                ),
-                const PopupMenuItem(
-                  value: 're_pair',
-                  child: Text('Unpair this contact'),
-                ),
-              ],
+              onPressed: _showChatOptions,
             ),
           ],
         ),
@@ -1904,7 +1830,10 @@ class _ChatScreenState extends State<ChatScreen>
     // never make the whole list shimmer.
     final isArriving = message.id == _freshMessageId;
     final bubble = GestureDetector(
-      onLongPress: () => _showMessageActions(message),
+      onLongPress: () {
+        HapticFeedback.mediumImpact();
+        _showMessageActions(message);
+      },
       onHorizontalDragEnd: (details) {
         if ((details.primaryVelocity ?? 0).abs() > 150) {
           setState(() => _replyingTo = message);

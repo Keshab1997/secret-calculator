@@ -195,6 +195,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
 
   Future<void> _onButtonPressed(String value) async {
     if (_navigating) return;
+    HapticFeedback.selectionClick();
     _engine.customCode = _firebase.customPasscode;
     _engine.decoyCode = _firebase.decoyPasscode;
     var navigate = false;
