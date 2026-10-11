@@ -4,22 +4,76 @@ import '../services/media_cache_service.dart';
 
 const chatGreen = Color(0xFF1DAA61);
 const chatInk = Color(0xFF172126);
+
+/// One type scale for the whole messaging side — headers, list rows, message
+/// bodies, captions. Every screen reads from it instead of inventing sizes,
+/// which is what makes the app feel deliberate rather than assembled.
+const messagingTextTheme = TextTheme(
+  headlineSmall: TextStyle(
+    fontSize: 28,
+    fontWeight: FontWeight.bold,
+    letterSpacing: -0.4,
+  ),
+  titleLarge: TextStyle(
+    fontSize: 17.5,
+    fontWeight: FontWeight.w600,
+    letterSpacing: -0.2,
+  ),
+  titleMedium: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600),
+  bodyLarge: TextStyle(fontSize: 16, height: 1.28),
+  bodyMedium: TextStyle(fontSize: 15, height: 1.3),
+  bodySmall: TextStyle(fontSize: 13, height: 1.25),
+  labelLarge: TextStyle(
+    fontSize: 14,
+    fontWeight: FontWeight.w600,
+    letterSpacing: 0.1,
+  ),
+  labelMedium: TextStyle(fontSize: 12.5),
+  labelSmall: TextStyle(fontSize: 11, letterSpacing: 0.2),
+);
+
 final messagingTheme = ThemeData(
   useMaterial3: true,
   colorScheme: ColorScheme.fromSeed(
     seedColor: chatGreen,
     brightness: Brightness.light,
   ),
+  textTheme: messagingTextTheme,
   scaffoldBackgroundColor: Colors.white,
   appBarTheme: const AppBarTheme(
     backgroundColor: Colors.white,
     foregroundColor: chatInk,
     surfaceTintColor: Colors.transparent,
+    elevation: 0,
+    scrolledUnderElevation: 0.5,
   ),
 );
 
-MaterialPageRoute<T> messagingRoute<T>(Widget child) => MaterialPageRoute<T>(
-  builder: (_) => Theme(data: messagingTheme, child: child),
+/// A messaging route: fade through with a small rise instead of the platform
+/// push. The default push swings the whole page sideways, which reads as
+/// abrupt next to the rest of this side of the app — here the page settles
+/// into place.
+PageRoute<T> messagingRoute<T>(Widget child) => PageRouteBuilder<T>(
+  transitionDuration: const Duration(milliseconds: 240),
+  reverseTransitionDuration: const Duration(milliseconds: 200),
+  pageBuilder: (_, _, _) => Theme(data: messagingTheme, child: child),
+  transitionsBuilder: (_, animation, _, child) {
+    final curved = CurvedAnimation(
+      parent: animation,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return FadeTransition(
+      opacity: curved,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 0.025),
+          end: Offset.zero,
+        ).animate(curved),
+        child: child,
+      ),
+    );
+  },
 );
 
 /// Formats a call duration as `m:ss` (0:00 … 12:34).
