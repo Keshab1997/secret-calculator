@@ -333,6 +333,35 @@ void main() {
       );
     },
   );
+  testWidgets('classic black grey orange theme keeps the smart display', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(home: CalculatorScreen(historyStore: MemoryHistory())),
+    );
+    expect(
+      tester.widget<Scaffold>(find.byType(Scaffold)).backgroundColor,
+      Colors.black,
+    );
+    final digit = tester.widget<ElevatedButton>(
+      find.byKey(const ValueKey('calculator-key-7')),
+    );
+    final operator = tester.widget<ElevatedButton>(
+      find.byKey(const ValueKey('calculator-key-+')),
+    );
+    final equals = tester.widget<ElevatedButton>(
+      find.byKey(const ValueKey('calculator-key-=')),
+    );
+    expect(digit.style!.backgroundColor!.resolve({}), const Color(0xFF303030));
+    expect(operator.style!.backgroundColor!.resolve({}), Colors.orange);
+    expect(equals.style!.backgroundColor!.resolve({}), Colors.orange);
+    await tapKeys(tester, '12+12+13+78-60');
+    final result = tester.widget<Text>(
+      find.byKey(const ValueKey('calculator-result')),
+    );
+    expect(result.data, '55');
+    expect(result.style!.color, Colors.white);
+  });
   for (final size in [const Size(320, 568), const Size(844, 390)]) {
     testWidgets('long expression is scrollable without overflow at $size', (
       tester,

@@ -19,9 +19,9 @@ class CalculatorScreen extends StatefulWidget {
 }
 
 class _CalculatorScreenState extends State<CalculatorScreen> {
-  static const _background = Color(0xFF101715);
-  static const _surface = Color(0xFF1C2723);
-  static const _accent = Color(0xFFBDE9CD);
+  static const _background = Colors.black;
+  static const _surface = Color(0xFF303030);
+  static const _accent = Colors.orange;
   final CalculatorEngine _engine = CalculatorEngine();
   final FirebaseService _firebase = FirebaseService();
   final NativeBridgeService _native = NativeBridgeService();
@@ -438,7 +438,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
         Text(
           _engine.isFinished ? 'RESULT' : 'RUNNING RESULT',
           style: const TextStyle(
-            color: Color(0xFF879A90),
+            color: Colors.white54,
             fontSize: 10,
             letterSpacing: 2,
             fontWeight: FontWeight.w600,
@@ -468,9 +468,9 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 _groupNumber(_engine.output),
                 key: const ValueKey('calculator-result'),
                 style: const TextStyle(
-                  color: _accent,
+                  color: Colors.white,
                   fontSize: 64,
-                  fontWeight: FontWeight.w400,
+                  fontWeight: FontWeight.w300,
                   letterSpacing: -1.5,
                 ),
               ),
@@ -508,22 +508,16 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
             key: ValueKey('calculator-key-$label'),
             onPressed: () => _onButtonPressed(label),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isEquals
+              backgroundColor: isEquals || isOperator
                   ? _accent
-                  : isOperator
-                  ? const Color(0xFF293F34)
                   : isUtility
-                  ? const Color(0xFF26312C)
+                  ? const Color(0xFF616161)
                   : _surface,
-              foregroundColor: isEquals
-                  ? _background
-                  : isOperator || isUtility
-                  ? _accent
-                  : Colors.white,
+              foregroundColor: Colors.white,
               elevation: 0,
               padding: EdgeInsets.zero,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(22),
+                borderRadius: BorderRadius.circular(16),
               ),
             ),
             child: label == '⌫'
@@ -625,7 +619,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
                 Expanded(child: _display()),
                 const Divider(
                   height: 1,
-                  color: Color(0xFF25342C),
+                  color: Color(0xFF303030),
                   indent: 24,
                   endIndent: 24,
                 ),
