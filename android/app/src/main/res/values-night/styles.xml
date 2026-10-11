@@ -13,6 +13,8 @@
 
          This Theme is only used starting with V2 of Flutter's Android embedding. -->
     <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
-        <item name="android:windowBackground">?android:colorBackground</item>
+        <!-- The calculator is a black screen; a light window behind the first
+             frame would flash white between splash and UI. -->
+        <item name="android:windowBackground">@android:color/black</item>
     </style>
 </resources>
