@@ -31,7 +31,7 @@ class StickerCategory {
 final List<StickerCategory> stickerCategories = [
   StickerCategory(
     id: 'love',
-    name: 'Love & Hearts',
+    name: 'Love & Romance',
     icon: '❤️',
     stickers: const [
       Sticker(
@@ -39,6 +39,48 @@ final List<StickerCategory> stickerCategories = [
         emoji: '❤️',
         name: 'Red Heart',
         tags: ['heart', 'love', 'red', 'valentine'],
+      ),
+      Sticker(
+        id: 'rose',
+        emoji: '🌹',
+        name: 'Rose',
+        tags: ['rose', 'flower', 'love', 'romance', 'valentine', 'gift'],
+      ),
+      Sticker(
+        id: 'bouquet',
+        emoji: '💐',
+        name: 'Flower Bouquet',
+        tags: ['bouquet', 'flowers', 'rose', 'romance', 'love', 'gift'],
+      ),
+      Sticker(
+        id: 'teddy_bear',
+        emoji: '🧸',
+        name: 'Teddy Bear',
+        tags: ['teddy', 'bear', 'plush', 'cute', 'love', 'gift', 'hug'],
+      ),
+      Sticker(
+        id: 'teddy_hug',
+        emoji: '🤗',
+        name: 'Teddy Hug',
+        tags: ['teddy', 'bear', 'hug', 'cuddle', 'love', 'warm'],
+      ),
+      Sticker(
+        id: 'couple_hug',
+        emoji: '🫂',
+        name: 'Couple Hug',
+        tags: ['hug', 'cuddle', 'couple', 'love', 'romance'],
+      ),
+      Sticker(
+        id: 'couple_heart',
+        emoji: '💑',
+        name: 'Couple with Heart',
+        tags: ['couple', 'love', 'romance', 'heart', 'relationship'],
+      ),
+      Sticker(
+        id: 'couple_kiss',
+        emoji: '💏',
+        name: 'Couple Kiss',
+        tags: ['kiss', 'couple', 'love', 'romance'],
       ),
       Sticker(
         id: 'sparkling_heart',
@@ -51,6 +93,18 @@ final List<StickerCategory> stickerCategories = [
         emoji: '😍',
         name: 'Heart Eyes',
         tags: ['love', 'eyes', 'heart', 'face'],
+      ),
+      Sticker(
+        id: 'smiling_hearts',
+        emoji: '🥰',
+        name: 'Smiling Face with Hearts',
+        tags: ['love', 'hearts', 'smile', 'affection', 'cute'],
+      ),
+      Sticker(
+        id: 'blowing_kiss',
+        emoji: '😘',
+        name: 'Blowing a Kiss',
+        tags: ['kiss', 'love', 'romance', 'flirt'],
       ),
       Sticker(
         id: 'kiss',
@@ -93,6 +147,30 @@ final List<StickerCategory> stickerCategories = [
         emoji: '💌',
         name: 'Love Letter',
         tags: ['letter', 'love', 'envelope', 'mail'],
+      ),
+      Sticker(
+        id: 'heart_hands',
+        emoji: '🫶',
+        name: 'Heart Hands',
+        tags: ['heart', 'hands', 'love', 'affection'],
+      ),
+      Sticker(
+        id: 'promise_ring',
+        emoji: '💍',
+        name: 'Promise Ring',
+        tags: ['ring', 'promise', 'engagement', 'love', 'proposal'],
+      ),
+      Sticker(
+        id: 'chocolates',
+        emoji: '🍫',
+        name: 'Love Chocolates',
+        tags: ['chocolate', 'sweet', 'gift', 'love', 'valentine'],
+      ),
+      Sticker(
+        id: 'tulip',
+        emoji: '🌷',
+        name: 'Tulip',
+        tags: ['tulip', 'flower', 'love', 'romance', 'spring'],
       ),
     ],
   ),

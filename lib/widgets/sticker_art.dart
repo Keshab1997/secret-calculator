@@ -19,6 +19,12 @@ class StickerArt extends StatelessWidget {
       '🥰',
       '😘',
       '🤗',
+      '🌹',
+      '💐',
+      '🧸',
+      '🫂',
+      '💑',
+      '💏',
     ];
     if (!love.contains(emoji)) {
       return SizedBox(
@@ -132,11 +138,110 @@ class _LoveSticker extends CustomPainter {
     c.restore();
   }
 
+  void _rose(Canvas canvas, Offset at, double scale, Color petals) {
+    canvas.save();
+    canvas.translate(at.dx, at.dy);
+    canvas.scale(scale);
+
+    final stem = Paint()
+      ..color = const Color(0xFF4E9A68)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3.5
+      ..strokeCap = StrokeCap.round;
+    canvas.drawLine(const Offset(0, 12), const Offset(1, 52), stem);
+
+    final leaves = Paint()..color = const Color(0xFF5EAD72);
+    canvas.drawPath(
+      Path()
+        ..moveTo(0, 33)
+        ..quadraticBezierTo(-20, 17, -21, 9)
+        ..quadraticBezierTo(-5, 11, 0, 33)
+        ..close(),
+      leaves,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(1, 43)
+        ..quadraticBezierTo(19, 28, 21, 21)
+        ..quadraticBezierTo(6, 23, 1, 43)
+        ..close(),
+      leaves,
+    );
+
+    final shadowPetal = Paint()..color = petals.withValues(alpha: 0.55);
+    final petal = Paint()..color = petals;
+    canvas.drawCircle(const Offset(0, 0), 17, shadowPetal);
+    canvas.drawOval(
+      Rect.fromCenter(center: const Offset(-8, -3), width: 17, height: 19),
+      petal,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: const Offset(8, -3), width: 17, height: 19),
+      petal,
+    );
+    canvas.drawOval(
+      Rect.fromCenter(center: const Offset(0, -9), width: 17, height: 18),
+      petal,
+    );
+    canvas.drawCircle(
+      const Offset(0, -2),
+      7,
+      Paint()..color = const Color(0xFFB92E58),
+    );
+    canvas.drawCircle(
+      const Offset(-2, -5),
+      2,
+      Paint()..color = const Color(0xFFFFD166),
+    );
+    canvas.restore();
+  }
+
+  void _bouquet(Canvas canvas) {
+    _rose(canvas, const Offset(34, 37), 0.64, const Color(0xFFE85D78));
+    _rose(canvas, const Offset(50, 27), 0.72, const Color(0xFFCC3E67));
+    _rose(canvas, const Offset(66, 37), 0.64, const Color(0xFFFF8295));
+
+    final wrap = Path()
+      ..moveTo(31, 61)
+      ..lineTo(69, 61)
+      ..lineTo(61, 91)
+      ..lineTo(39, 91)
+      ..close();
+    canvas.drawPath(wrap, Paint()..color = const Color(0xFFFFE6EB));
+    canvas.drawPath(
+      wrap,
+      Paint()
+        ..color = const Color(0xFFE0A4B3)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.8,
+    );
+    canvas.drawPath(
+      Path()
+        ..moveTo(50, 64)
+        ..cubicTo(40, 58, 37, 68, 49, 71)
+        ..moveTo(50, 64)
+        ..cubicTo(60, 58, 63, 68, 51, 71),
+      Paint()
+        ..color = const Color(0xFFC94F70)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.2
+        ..strokeCap = StrokeCap.round,
+    );
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
     canvas.scale(size.width / 100, size.height / 100);
-    if (emoji == '❤️' || emoji == '💖' || emoji == '💝') {
+    if (emoji == '🌹') {
+      _rose(canvas, const Offset(50, 31), 0.95, const Color(0xFFE5486D));
+      _heart(canvas, const Offset(81, 20), .42, const Color(0xFFFFB0C1));
+    } else if (emoji == '💐') {
+      _bouquet(canvas);
+    } else if (emoji == '🧸') {
+      _bear(canvas, const Offset(50, 39), const Color(0xFFD6B18D), false);
+      _heart(canvas, const Offset(50, 70), .48, const Color(0xFFEF4469));
+    } else if (emoji == '❤️' || emoji == '💖' || emoji == '💝') {
       _heart(canvas, const Offset(50, 59), 2.1, const Color(0xFFEF4469));
       canvas.drawOval(
         const Rect.fromLTWH(22, 29, 9, 15),
@@ -146,7 +251,7 @@ class _LoveSticker extends CustomPainter {
         _heart(canvas, const Offset(79, 24), .5, const Color(0xFFFFB849));
       }
     } else {
-      final pair = ['💕', '💞', '💋', '🤗'].contains(emoji);
+      final pair = ['💕', '💞', '💋', '🤗', '🫂', '💑', '💏'].contains(emoji);
       if (pair) {
         _bear(canvas, const Offset(34, 44), const Color(0xFFD6B18D), true);
         _bear(canvas, const Offset(65, 47), const Color(0xFFFFF6EE), true);

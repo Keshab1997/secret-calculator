@@ -107,8 +107,12 @@ class _StickerKeyboardState extends State<StickerKeyboard> {
                       onSelected: (_) =>
                           setState(() => _selectedCategoryIndex = index),
                       backgroundColor: Colors.grey.shade200,
-                      selectedColor: const Color(0xFFD9FDD3),
-                      checkmarkColor: const Color(0xFF168B53),
+                      selectedColor: category.id == 'love'
+                          ? const Color(0xFFFFE4EC)
+                          : const Color(0xFFD9FDD3),
+                      checkmarkColor: category.id == 'love'
+                          ? const Color(0xFFC04868)
+                          : const Color(0xFF168B53),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(20),
                       ),
