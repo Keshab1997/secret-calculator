@@ -20,7 +20,8 @@ class ChatsScreen extends StatefulWidget {
 
 class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
   final _service = FirebaseService();
-  final Map<String, List<StreamSubscription<DatabaseEvent>>> _subscriptions = {};
+  final Map<String, List<StreamSubscription<DatabaseEvent>>> _subscriptions =
+      {};
   final Map<String, Map> _rooms = {};
   String _query = '';
   String? _error;
@@ -78,14 +79,18 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
       }
 
       _subscriptions[code] = [
-        _service.roomMessagesStream(code).listen(
-          (event) => putChild('messages', event.snapshot.value),
-          onError: onError,
-        ),
-        _service.roomChildStream(code, 'profiles').listen(
-          (event) => putChild('profiles', event.snapshot.value),
-          onError: onError,
-        ),
+        _service
+            .roomMessagesStream(code)
+            .listen(
+              (event) => putChild('messages', event.snapshot.value),
+              onError: onError,
+            ),
+        _service
+            .roomChildStream(code, 'profiles')
+            .listen(
+              (event) => putChild('profiles', event.snapshot.value),
+              onError: onError,
+            ),
         _service.roomChildStream(code, 'call').listen((event) {
           if (!mounted) return;
           final call = event.snapshot.value;
@@ -229,21 +234,17 @@ class _ChatsScreenState extends State<ChatsScreen> with WidgetsBindingObserver {
     final codes = widget.decoyMode
         ? <String>[]
         : (_service.pairedRooms.keys.where((code) {
-              final p = _service.partnerProfile(
-                code,
-                _rooms[code]?['profiles'],
-              );
-              return '${p['name'] ?? 'Paired contact'} $code'
-                  .toLowerCase()
-                  .contains(_query.toLowerCase());
-            }).toList()
-              ..sort((a, b) {
-                final ma = _messages(a), mb = _messages(b);
-                return (mb.isEmpty ? 0 : (mb.first['timestamp'] as int? ?? 0))
-                    .compareTo(
-                      ma.isEmpty ? 0 : (ma.first['timestamp'] as int? ?? 0),
-                    );
-              }));
+            final p = _service.partnerProfile(code, _rooms[code]?['profiles']);
+            return '${p['name'] ?? 'Paired contact'} $code'
+                .toLowerCase()
+                .contains(_query.toLowerCase());
+          }).toList()..sort((a, b) {
+            final ma = _messages(a), mb = _messages(b);
+            return (mb.isEmpty ? 0 : (mb.first['timestamp'] as int? ?? 0))
+                .compareTo(
+                  ma.isEmpty ? 0 : (ma.first['timestamp'] as int? ?? 0),
+                );
+          }));
     final calls = <Map<String, dynamic>>[];
     for (final code in codes) {
       for (final m in _messages(code).where((m) => m['callType'] != null)) {

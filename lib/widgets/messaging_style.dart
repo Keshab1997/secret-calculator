@@ -43,8 +43,7 @@ String formatCallDuration(int totalSeconds) {
   required bool isMe,
 }) {
   final kind = callType == 'video' ? 'Video' : 'Voice';
-  final outcome =
-      callOutcome ?? (callSeconds == null ? 'missed' : 'completed');
+  final outcome = callOutcome ?? (callSeconds == null ? 'missed' : 'completed');
   switch (outcome) {
     case 'declined':
       return (title: 'Declined $kind call', detail: 'Tap to call back');
