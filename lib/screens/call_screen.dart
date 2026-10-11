@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
@@ -67,6 +68,7 @@ class _CallScreenState extends State<CallScreen> {
   Timer? _durationTimer;
   Timer? _ringTimer;
   Timer? _connectionWatchdog;
+  Timer? _audioRouteSync;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -134,6 +136,7 @@ class _CallScreenState extends State<CallScreen> {
 
   Future<void> _setupLocalMedia() async {
     if (_localStream != null) return;
+    await _applyAudioConfiguration();
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': widget.isVideo ? _videoConstraints : false,
@@ -158,6 +161,13 @@ class _CallScreenState extends State<CallScreen> {
       } catch (_) {}
     };
     _pc!.onTrack = (event) {
+      if (event.track.kind == 'audio') {
+        // Remote audio is played by the platform's audio device on its own;
+        // what is worth doing here is making sure the route is applied now
+        // that playout has actually started.
+        _scheduleAudioRouteSync();
+        return;
+      }
       if (!widget.isVideo || event.track.kind != 'video') return;
       if (event.streams.isEmpty) return;
       _remoteStream = event.streams.first;
@@ -182,6 +192,9 @@ class _CallScreenState extends State<CallScreen> {
       } else if (state ==
           RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _connectionWatchdog?.cancel();
+        // The audio session exists from here on, so this is the first moment
+        // the route can stick — see [_scheduleAudioRouteSync].
+        _scheduleAudioRouteSync();
       }
     };
     await _applySpeaker();
@@ -492,9 +505,50 @@ class _CallScreenState extends State<CallScreen> {
     } catch (_) {}
   }
 
+  /// Puts Android into call mode: communication audio with gain focus.
+  ///
+  /// Runs before the peer connection exists — the plugin does not accept a
+  /// configuration change mid-session — and it is what makes the route below
+  /// mean anything on devices that would otherwise keep the media on the
+  /// default output.
+  Future<void> _applyAudioConfiguration() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await Helper.setAndroidAudioConfiguration(
+        AndroidAudioConfiguration(
+          androidAudioMode: AndroidAudioMode.inCommunication,
+          androidAudioFocusMode: AndroidAudioFocusMode.gain,
+        ),
+      );
+    } catch (_) {
+      // Best-effort: a rejected mode must never take the call down.
+    }
+  }
+
+  /// Re-applies the earpiece/speaker route once the peer connection has an
+  /// audio session, then once more a beat later for the audio device module's
+  /// own mode flip as capture starts.
+  ///
+  /// The order is what makes it work: applied only at setup — before the
+  /// connection has an audio session — the route is silently dropped on some
+  /// Android devices while the ADM takes the mode over, which leaves a voice
+  /// call (earpiece) silent even though a video call (speaker on) sounds
+  /// fine. The second pass re-reads [_isSpeakerOn], so a Speaker tap in that
+  /// window is honoured rather than fought.
+  void _scheduleAudioRouteSync() {
+    _applySpeaker();
+    _audioRouteSync?.cancel();
+    _audioRouteSync = Timer(const Duration(milliseconds: 900), () {
+      if (_disposed || _tornDown) return;
+      _applySpeaker();
+    });
+  }
+
   Future<void> _teardownWebRTC() async {
     if (_tornDown) return;
     _tornDown = true;
+    _audioRouteSync?.cancel();
+    _audioRouteSync = null;
     try {
       final pc = _pc;
       _pc = null;
@@ -533,6 +587,7 @@ class _CallScreenState extends State<CallScreen> {
     _durationTimer?.cancel();
     _ringTimer?.cancel();
     _connectionWatchdog?.cancel();
+    _audioRouteSync?.cancel();
     _callSub?.cancel();
     _teardownWebRTC();
     _native.stopAudio();
