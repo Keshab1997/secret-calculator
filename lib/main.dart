@@ -15,7 +15,16 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NativeBridgeService().cleanupStaleVoicePlaybackFiles();
-  await Firebase.initializeApp();
+  // Firebase init must never be able to strand the native splash. It throws
+  // on a bad or missing config — google-services.json is a CI secret, not in
+  // the repo — and a throw here, before runApp(), leaves the black launch
+  // window up forever with no crash UI to explain it. The timeout covers the
+  // rarer case where the call neither returns nor throws.
+  try {
+    await Firebase.initializeApp().timeout(const Duration(seconds: 10));
+  } catch (error) {
+    debugPrint('Firebase initialization failed: $error');
+  }
 
   // Report uncaught errors to Crashlytics: framework errors come through
   // FlutterError.onError, everything else (async, platform) through the
@@ -36,7 +45,16 @@ void main() async {
   // A network sign-in held that spot before, and signInAnonymously() has no
   // timeout of its own: on a device that cannot reach Firebase the app sat
   // on the native splash forever — a try/catch catches errors, not a hang.
-  await firebaseService.loadSavedState();
+  // loadSavedState() swallows its own errors, but only a timeout bounds the
+  // secure-store read it waits on: a wedged platform keystore would otherwise
+  // hold the first frame back the same way.
+  try {
+    await firebaseService.loadSavedState().timeout(
+      const Duration(seconds: 10),
+    );
+  } catch (error) {
+    debugPrint('Loading saved state failed: $error');
+  }
   unawaited(
     firebaseService
         .ensureAuthenticated()
