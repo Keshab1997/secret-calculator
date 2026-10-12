@@ -66,11 +66,22 @@ class _PairingScreenState extends State<PairingScreen> {
         setState(() {
           _loadingPersonalId = false;
           if (_personalId == null) {
-            _error = 'Could not load your Personal ID. Check your connection and Firebase setup.';
+            _error = _personalIdError();
           }
         });
       }
     }
+  }
+
+  /// A missing Auth identity is a Firebase Console setup problem (Anonymous
+  /// Auth is off), not a network one — telling the user to check their
+  /// connection for it sends them looking in the wrong place.
+  String _personalIdError() {
+    if (_firebase.authUid == null) {
+      return 'Secure pairing needs Firebase Anonymous Authentication. Enable it '
+          'in the Firebase Console, then restart the app.';
+    }
+    return 'Could not load your Personal ID. Check your connection and Firebase setup.';
   }
 
   Future<void> _sendRequest() async {

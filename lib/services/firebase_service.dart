@@ -597,6 +597,12 @@ class FirebaseService {
   }
 
   Future<String> _fetchPersonalId() async {
+    // Anonymous sign-in is fire-and-forget at launch (main.dart) so the
+    // calculator comes up before it lands. Pairing is usually the first screen
+    // that needs that identity, so wait for the in-flight sign-in here rather
+    // than failing on a uid that exists a moment later; only a sign-in that has
+    // genuinely failed still throws below.
+    await ensureAuthenticated();
     _requireAuthenticatedUid();
     final result = await _functions
         .httpsCallable('getOrCreatePersonalId')
@@ -646,6 +652,10 @@ class FirebaseService {
     if (personalId == null) {
       throw const FormatException('Enter a valid 10-character Personal ID.');
     }
+    // Wait for the same in-flight anonymous sign-in the Personal ID needs: a
+    // request sent right after opening pairing must not be rejected for a uid
+    // that is about to exist.
+    await ensureAuthenticated();
     _requireAuthenticatedUid();
     await getOrCreatePersonalId();
     final requestId = base64UrlEncode(
