@@ -29,23 +29,34 @@ void main() async {
   // Crashlytics needs a live Firebase app. Reaching for its instance when init
   // failed throws (`No Firebase App '[DEFAULT]' has been created`) right here —
   // before runApp() — which strands the splash the same way, so the whole
-  // error-reporting block is gated on the app actually existing.
+  // error-reporting block is gated on the app actually existing. The instance
+  // lookup itself can also throw on a device where the Crashlytics component
+  // never registered, so it stays inside a guard too: error reporting must
+  // never be the thing that kills startup.
   if (Firebase.apps.isNotEmpty) {
-    // Report uncaught errors to Crashlytics: framework errors come through
-    // FlutterError.onError, everything else (async, platform) through the
-    // platform dispatcher. presentError keeps the normal debug output.
-    final crashlytics = FirebaseCrashlytics.instance;
-    FlutterError.onError = (details) {
-      FlutterError.presentError(details);
-      crashlytics.recordFlutterFatalError(details);
-    };
-    PlatformDispatcher.instance.onError = (error, stack) {
-      crashlytics.recordError(error, stack, fatal: true);
-      return true;
-    };
+    try {
+      // Report uncaught errors to Crashlytics: framework errors come through
+      // FlutterError.onError, everything else (async, platform) through the
+      // platform dispatcher. presentError keeps the normal debug output.
+      final crashlytics = FirebaseCrashlytics.instance;
+      FlutterError.onError = (details) {
+        FlutterError.presentError(details);
+        crashlytics.recordFlutterFatalError(details);
+      };
+      PlatformDispatcher.instance.onError = (error, stack) {
+        crashlytics.recordError(error, stack, fatal: true);
+        return true;
+      };
+    } catch (error) {
+      debugPrint('Crashlytics unavailable: $error');
+    }
   }
 
-  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  try {
+    FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+  } catch (error) {
+    debugPrint('Background messaging unavailable: $error');
+  }
   final firebaseService = FirebaseService();
   // Only local work may sit between the launch screen and the first frame.
   // A network sign-in held that spot before, and signInAnonymously() has no
