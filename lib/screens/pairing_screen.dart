@@ -507,6 +507,12 @@ class _PairingScreenState extends State<PairingScreen> {
           const SizedBox(height: 10),
         ],
         TextField(
+          // Unique PageStorage slot for this field's internal Scrollable. The
+          // ExpansionTile above saves a *bool* (its expanded state) under
+          // 'legacy-pairing'; without a distinct key here the field's scroll
+          // position restores from that same slot and crashes casting the bool
+          // to a double offset.
+          key: const PageStorageKey<String>('legacy-invite-field'),
           controller: _legacyCodeController,
           keyboardType: TextInputType.visiblePassword,
           textCapitalization: TextCapitalization.none,

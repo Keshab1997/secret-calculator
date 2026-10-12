@@ -51,4 +51,30 @@ void main() {
     await pumpPairingAt(tester, const Size(320, 568));
     await expectPairingControlsReachable(tester);
   });
+
+  testWidgets(
+    'expanding the legacy invite does not misread the ExpansionTile bool as a scroll offset',
+    (tester) async {
+      await pumpPairingAt(tester, const Size(360, 640));
+
+      final tile = find.text('Legacy secure invite');
+      await tester.scrollUntilVisible(
+        tile,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(tile);
+      await tester.pumpAndSettle();
+
+      // The field inside the section must mount without the
+      // "type 'bool' is not a subtype of type 'double?'" PageStorage cast crash.
+      expect(tester.takeException(), isNull, reason: 'legacy field crashed');
+      expect(
+        find.byKey(const PageStorageKey<String>('legacy-invite-field')),
+        findsOneWidget,
+      );
+    },
+  );
 }
