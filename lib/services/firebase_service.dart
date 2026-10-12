@@ -620,16 +620,22 @@ class FirebaseService {
   }
 
   /// Incoming requests are readable only to this installation's Auth UID.
+  /// Broadcast on purpose: the underlying onValue is a single-subscription
+  /// generator stream, and the pairing screen stores this once for a
+  /// StreamBuilder that can remount (rows appearing above it reshape the
+  /// list). A second listen to the stored instance would throw
+  /// "Bad state: Stream has already been listened to".
   Stream<DatabaseEvent> incomingContactRequests() {
     final uid = authUid;
     if (Firebase.apps.isEmpty || uid == null) return const Stream.empty();
-    return _db.ref('users/$uid/requests').onValue;
+    return _db.ref('users/$uid/requests').onValue.asBroadcastStream();
   }
 
   /// Tracks the current installation's outgoing request statuses.
   Stream<DatabaseEvent> sentContactRequests() {
     final uid = authUid;
     if (Firebase.apps.isEmpty || uid == null) return const Stream.empty();
+    // Broadcast for the same remount reason as incomingContactRequests().
     return _db.ref('users/$uid/sentRequests').onValue.map((event) {
       final raw = event.snapshot.value;
       if (raw is Map) {
@@ -643,7 +649,7 @@ class FirebaseService {
         }
       }
       return event;
-    });
+    }).asBroadcastStream();
   }
 
   /// Sends an approval request to the owner of [enteredPersonalId].

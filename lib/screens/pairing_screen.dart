@@ -296,6 +296,10 @@ class _PairingScreenState extends State<PairingScreen> {
   Widget _incomingRequests(MessagingPalette palette) {
     if (_firebase.authUid == null) return const SizedBox.shrink();
     return StreamBuilder<DatabaseEvent>(
+      // Stable identity: rows above this card (error/notice text) come and
+      // go, and a keyless child at a shifting position remounts — losing
+      // the cached snapshot and resubscribing the stored stream.
+      key: const ValueKey('incoming-requests'),
       stream: _incomingRequestsStream,
       builder: (context, snapshot) {
         final uid = _firebase.authUid;
@@ -394,6 +398,8 @@ class _PairingScreenState extends State<PairingScreen> {
   Widget _outgoingRequests() {
     if (_firebase.authUid == null) return const SizedBox.shrink();
     return StreamBuilder<DatabaseEvent>(
+      // Stable identity, same reason as the incoming requests above.
+      key: const ValueKey('outgoing-requests'),
       stream: _outgoingRequestsStream,
       builder: (context, snapshot) {
         final requests = _requestEntries(snapshot.data?.snapshot.value)
