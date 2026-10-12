@@ -15,29 +15,35 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await NativeBridgeService().cleanupStaleVoicePlaybackFiles();
-  // Firebase init must never be able to strand the native splash. It throws
-  // on a bad or missing config — google-services.json is a CI secret, not in
-  // the repo — and a throw here, before runApp(), leaves the black launch
-  // window up forever with no crash UI to explain it. The timeout covers the
-  // rarer case where the call neither returns nor throws.
+  // Nothing between the launch screen and the first frame may throw or hang
+  // without a bound: in a release build an error here is silent, so the app
+  // just sits on the black splash. Firebase init throws on a bad or missing
+  // config (google-services.json is a CI secret, not in the repo) and can
+  // hang when it neither returns nor throws — the timeout covers both.
   try {
     await Firebase.initializeApp().timeout(const Duration(seconds: 10));
   } catch (error) {
     debugPrint('Firebase initialization failed: $error');
   }
 
-  // Report uncaught errors to Crashlytics: framework errors come through
-  // FlutterError.onError, everything else (async, platform) through the
-  // platform dispatcher. presentError keeps the normal debug output.
-  final crashlytics = FirebaseCrashlytics.instance;
-  FlutterError.onError = (details) {
-    FlutterError.presentError(details);
-    crashlytics.recordFlutterFatalError(details);
-  };
-  PlatformDispatcher.instance.onError = (error, stack) {
-    crashlytics.recordError(error, stack, fatal: true);
-    return true;
-  };
+  // Crashlytics needs a live Firebase app. Reaching for its instance when init
+  // failed throws (`No Firebase App '[DEFAULT]' has been created`) right here —
+  // before runApp() — which strands the splash the same way, so the whole
+  // error-reporting block is gated on the app actually existing.
+  if (Firebase.apps.isNotEmpty) {
+    // Report uncaught errors to Crashlytics: framework errors come through
+    // FlutterError.onError, everything else (async, platform) through the
+    // platform dispatcher. presentError keeps the normal debug output.
+    final crashlytics = FirebaseCrashlytics.instance;
+    FlutterError.onError = (details) {
+      FlutterError.presentError(details);
+      crashlytics.recordFlutterFatalError(details);
+    };
+    PlatformDispatcher.instance.onError = (error, stack) {
+      crashlytics.recordError(error, stack, fatal: true);
+      return true;
+    };
+  }
 
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   final firebaseService = FirebaseService();
