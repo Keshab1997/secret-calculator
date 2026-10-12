@@ -19,7 +19,8 @@ export '../models/calculator_engine.dart';
 
 class CalculatorScreen extends StatefulWidget {
   final CalculatorHistoryStore? historyStore;
-  const CalculatorScreen({super.key, this.historyStore});
+  final Future<void>? startupComplete;
+  const CalculatorScreen({super.key, this.historyStore, this.startupComplete});
   @override
   State<CalculatorScreen> createState() => _CalculatorScreenState();
 }
@@ -51,6 +52,18 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
     _historyReady = _loadHistory();
     _syncRoomMessageListeners();
     _syncRoomCallListeners();
+    final startupComplete = widget.startupComplete;
+    if (startupComplete != null) {
+      unawaited(
+        startupComplete.then((_) {
+          if (!mounted) return;
+          // Saved pairings may have arrived after the first frame. Attach
+          // their listeners now, but only when Firebase initialized.
+          _syncRoomMessageListeners();
+          _syncRoomCallListeners();
+        }, onError: (_) {}),
+      );
+    }
   }
 
   Future<void> _loadHistory() async {
@@ -63,6 +76,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   }
 
   void _syncRoomMessageListeners() {
+    if (!_firebase.isFirebaseAvailable) return;
     for (final code in _roomMessageSubs.keys.toList()) {
       if (!_firebase.pairedRooms.containsKey(code)) {
         _roomMessageSubs.remove(code)?.cancel();
@@ -110,6 +124,7 @@ class _CalculatorScreenState extends State<CalculatorScreen> {
   /// while the calculator route is current (also true when the app sits
   /// backgrounded on the calculator).
   void _syncRoomCallListeners() {
+    if (!_firebase.isFirebaseAvailable) return;
     for (final code in _roomCallSubs.keys.toList()) {
       if (!_firebase.pairedRooms.containsKey(code)) {
         _roomCallSubs.remove(code)?.cancel();

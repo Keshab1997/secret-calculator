@@ -150,6 +150,11 @@ class FirebaseService {
     return room == null || secret == null ? null : '$room.$secret';
   }
 
+  /// Whether Firebase initialized successfully in this process. Screens use
+  /// this before creating streams so an APK with missing/bad configuration
+  /// still behaves as a calculator instead of throwing during its first frame.
+  bool get isFirebaseAvailable => Firebase.apps.isNotEmpty;
+
   /// Current Firebase Auth identity, or null until anonymous sign-in succeeds.
   String? get authUid =>
       Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser?.uid;

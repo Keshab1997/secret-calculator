@@ -12,14 +12,28 @@ import 'services/firebase_service.dart';
 import 'services/native_bridge_service.dart';
 import 'services/notification_service.dart';
 
-void main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  await NativeBridgeService().cleanupStaleVoicePlaybackFiles();
-  // Nothing between the launch screen and the first frame may throw or hang
-  // without a bound: in a release build an error here is silent, so the app
-  // just sits on the black splash. Firebase init throws on a bad or missing
-  // config (google-services.json is a CI secret, not in the repo) and can
-  // hang when it neither returns nor throws — the timeout covers both.
+
+  // Paint the calculator before touching plugins, disk or the network. A
+  // release-mode exception during startup is otherwise indistinguishable from
+  // the app opening and immediately closing. The calculator remains usable
+  // while the guarded bootstrap finishes in the background.
+  final startupComplete = _bootstrapApp();
+  runApp(CalculatorApp(startupComplete: startupComplete));
+}
+
+Future<void> _bootstrapApp() async {
+  try {
+    await NativeBridgeService().cleanupStaleVoicePlaybackFiles();
+  } catch (error) {
+    debugPrint('Voice-file cleanup failed: $error');
+  }
+
+  // Firebase init throws on a bad or missing config (google-services.json is a
+  // CI secret, not in the repo) and can hang when it neither returns nor
+  // throws — the timeout covers both. Neither case may take down the already
+  // visible calculator.
   try {
     await Firebase.initializeApp().timeout(const Duration(seconds: 10));
   } catch (error) {
@@ -85,12 +99,19 @@ void main() async {
           debugPrint('Firebase anonymous sign-in unavailable: $error');
         }),
   );
-  unawaited(NotificationService().initialize());
-  runApp(const CalculatorApp());
+  unawaited(
+    NotificationService().initialize().catchError((Object error) {
+      debugPrint('Notification initialization failed: $error');
+    }),
+  );
 }
 
 class CalculatorApp extends StatelessWidget {
-  const CalculatorApp({super.key});
+  const CalculatorApp({super.key, this.startupComplete});
+
+  /// Completes after local state and Firebase startup have been attempted.
+  /// The first frame never waits for it.
+  final Future<void>? startupComplete;
 
   @override
   Widget build(BuildContext context) {
@@ -108,7 +129,7 @@ class CalculatorApp extends StatelessWidget {
         theme: messagingTheme,
         darkTheme: messagingDarkTheme,
         themeMode: mode,
-        home: const CalculatorScreen(),
+        home: CalculatorScreen(startupComplete: startupComplete),
       ),
     );
   }
