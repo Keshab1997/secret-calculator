@@ -24,6 +24,23 @@ void main() {
       expect(FirebaseService.isValidRoomCode('AB-123'), isFalse);
     });
 
+    test(
+      'Personal IDs normalize for display and reject ambiguous characters',
+      () {
+        expect(FirebaseService.isValidPersonalId('ABCDEFGHJK'), isTrue);
+        expect(
+          FirebaseService.normalizePersonalId('abcde-fghjk'),
+          'ABCDEFGHJK',
+        );
+        expect(FirebaseService.formatPersonalId('abcde-fghjk'), 'ABCDE-FGHJK');
+        expect(FirebaseService.isValidPersonalId('ABCDE0GHJK'), isFalse);
+        expect(FirebaseService.isValidPersonalId('ABCDE1GHJK'), isFalse);
+        expect(FirebaseService.isValidPersonalId('ABCDEIGHJK'), isFalse);
+        expect(FirebaseService.isValidPersonalId('ABCDEOGHJK'), isFalse);
+        expect(FirebaseService.isValidPersonalId('ABCDEF'), isFalse);
+      },
+    );
+
     test('secure invitations include a separate 256-bit secret', () {
       for (var i = 0; i < 10; i++) {
         final room = FirebaseService.generateRoomCode();

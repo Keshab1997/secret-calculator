@@ -1137,7 +1137,18 @@ class _ChatScreenState extends State<ChatScreen>
         );
         if (confirmed != true) return;
         final leavingRoom = _firebase.getShortCode();
-        await _firebase.leaveRoom();
+        try {
+          await _firebase.leaveRoom();
+        } catch (_) {
+          if (mounted) {
+            AppToast.show(
+              context,
+              'Could not unlink this contact. Check your connection and retry.',
+              kind: AppToastKind.error,
+            );
+          }
+          return;
+        }
         MediaCacheService().clearRoomImages(leavingRoom);
         if (!mounted) return;
         Navigator.pop(context);

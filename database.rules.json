@@ -40,6 +40,21 @@
         }
       }
     },
+    "users": {
+      "$uid": {
+        ".read": "auth != null && auth.uid == $uid",
+        ".write": false,
+        "requests": {
+          ".indexOn": ["fromUid", "status", "createdAt"]
+        },
+        "contacts": {
+          ".indexOn": ["otherUid"]
+        },
+        "sentRequests": {
+          ".indexOn": ["status", "targetUid"]
+        }
+      }
+    },
     "expiring": {
       ".read": false,
       ".write": false,

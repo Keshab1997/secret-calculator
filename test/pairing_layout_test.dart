@@ -3,9 +3,8 @@ import 'package:calculator/widgets/messaging_style.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// The pairing screen is the first thing a new user sees. It must fit a phone
-/// screen whole — a JOIN button that hides below the fold reads as a broken
-/// screen. These tests pin that down on the two smallest common phone sizes.
+/// Personal-ID pairing keeps the main controls reachable on compact phones;
+/// the retained legacy invite flow is deliberately collapsed by default.
 void main() {
   Future<void> pumpPairingAt(WidgetTester tester, Size logicalSize) async {
     tester.view.physicalSize = logicalSize * 3;
@@ -15,43 +14,41 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(theme: messagingTheme, home: const PairingScreen()),
     );
-    await tester.pump();
+    await tester.pumpAndSettle();
   }
 
-  void expectFitsWithoutScrolling(WidgetTester tester, Size size) {
+  Future<void> expectPairingControlsReachable(WidgetTester tester) async {
     expect(tester.takeException(), isNull, reason: 'layout overflowed');
+    expect(find.text('Connect by Personal ID'), findsOneWidget);
+    expect(find.text('Your Personal ID'), findsOneWidget);
+    expect(find.text('Add a contact'), findsOneWidget);
 
-    // Both ends of the screen must be on-screen at once: the heading at the
-    // top and the JOIN button at the bottom.
-    for (final label in ['Your Secure Invite', 'Join Partner', 'JOIN']) {
-      final finder = find.text(label);
-      expect(finder, findsOneWidget, reason: '$label is missing');
-      final rect = tester.getRect(finder);
-      expect(
-        rect.top,
-        greaterThanOrEqualTo(0),
-        reason: '$label starts above the screen',
-      );
-      expect(
-        rect.bottom,
-        lessThanOrEqualTo(size.height),
-        reason: '$label sits below the fold — the user must scroll to reach it',
-      );
-      expect(
-        finder.hitTestable(),
-        findsOneWidget,
-        reason: '$label is not reachable by touch',
-      );
-    }
+    final sendButton = find.text('Send request');
+    await tester.ensureVisible(sendButton);
+    await tester.pumpAndSettle();
+    expect(sendButton.hitTestable(), findsOneWidget);
+    final legacySection = find.text('Legacy secure invite');
+    await tester.scrollUntilVisible(
+      legacySection,
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(legacySection.hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull, reason: 'layout overflowed');
   }
 
-  testWidgets('fits a 360x640 phone without scrolling', (tester) async {
+  testWidgets('pairing controls are reachable on a 360x640 phone', (
+    tester,
+  ) async {
     await pumpPairingAt(tester, const Size(360, 640));
-    expectFitsWithoutScrolling(tester, const Size(360, 640));
+    await expectPairingControlsReachable(tester);
   });
 
-  testWidgets('fits a 320x568 small phone without scrolling', (tester) async {
+  testWidgets('pairing controls are reachable on a 320x568 phone', (
+    tester,
+  ) async {
     await pumpPairingAt(tester, const Size(320, 568));
-    expectFitsWithoutScrolling(tester, const Size(360, 640));
+    await expectPairingControlsReachable(tester);
   });
 }

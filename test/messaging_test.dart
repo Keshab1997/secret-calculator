@@ -15,7 +15,7 @@ void main() {
       MaterialApp(theme: messagingTheme, home: const ChatsScreen()),
     );
     expect(find.text('Your private conversations'), findsOneWidget);
-    expect(find.byTooltip('Pair new contact'), findsOneWidget);
+    expect(find.byTooltip('Add contact by Personal ID'), findsOneWidget);
     await tester.tap(find.text('Calls'));
     await tester.pumpAndSettle();
     expect(find.text('No calls yet'), findsOneWidget);

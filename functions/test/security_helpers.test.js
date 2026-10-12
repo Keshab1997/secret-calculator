@@ -1,35 +1,74 @@
 const assert = require("node:assert/strict");
+const { createECDH } = require("node:crypto");
 const test = require("node:test");
 
 const {
-  hashInviteSecret,
-  inviteHashMatches,
+  generatePersonalId,
+  generateRoomId,
+  isValidKeyAgreementPublicKey,
+  isValidPersonalId,
+  isValidRequestId,
+  contactPairLockKey,
+  normalizePersonalId,
+  inviteSecretHashMatches,
   isAllowedExpiry,
-  isValidInviteSecret,
+  isValidInviteSecretHash,
   isValidPeerId,
   isValidRoomId,
   safeImagePathForRoom,
 } = require("../lib/security_helpers.js");
 
-test("secure pairing validates room ids, 256-bit invites, and peer ids", () => {
-  const invite = Buffer.alloc(32, 0x5a).toString("base64url");
+test("secure pairing validates room ids, invite verifiers, and peer ids", () => {
+  const verifier =
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
   assert.equal(isValidRoomId("AB23CD"), true);
   assert.equal(isValidRoomId("ab23cd"), false);
   assert.equal(isValidRoomId("AB23C"), false);
-  assert.equal(isValidInviteSecret(invite), true);
-  assert.equal(isValidInviteSecret("A".repeat(43)), true);
-  assert.equal(isValidInviteSecret("A".repeat(42)), false);
+  assert.equal(isValidInviteSecretHash(verifier), true);
+  assert.equal(isValidInviteSecretHash("A".repeat(64)), false);
   assert.equal(isValidPeerId("0123456789abcdef"), true);
   assert.equal(isValidPeerId("not-a-peer-id"), false);
 });
 
-test("invite secrets are stored as hashes and compared in constant time", () => {
-  const invite = Buffer.alloc(32, 0x31).toString("base64url");
-  const hash = hashInviteSecret(invite);
-  assert.match(hash, /^[a-f0-9]{64}$/);
-  assert.equal(inviteHashMatches(invite, hash), true);
-  assert.equal(inviteHashMatches(`${invite.slice(0, -1)}A`, hash), false);
-  assert.equal(inviteHashMatches(invite, "invalid"), false);
+test("personal IDs are readable, normalized, and not room secrets", () => {
+  const personalId = generatePersonalId();
+  assert.equal(personalId.length, 10);
+  assert.equal(isValidPersonalId(personalId), true);
+  assert.equal(normalizePersonalId(` ${personalId.slice(0, 5)}-${personalId.slice(5).toLowerCase()} `), personalId);
+  assert.equal(normalizePersonalId("bad-id"), null);
+  assert.equal(generateRoomId().length, 6);
+  assert.equal(isValidRequestId("A".repeat(22)), true);
+  assert.equal(isValidRequestId("A".repeat(21)), false);
+});
+
+test("contact pair lock keys are canonical without delimiter collisions", () => {
+  assert.equal(
+    contactPairLockKey("uid-a", "uid-b"),
+    contactPairLockKey("uid-b", "uid-a"),
+  );
+  assert.notEqual(
+    contactPairLockKey("a", "b_c"),
+    contactPairLockKey("a_b", "c"),
+  );
+  assert.match(contactPairLockKey("uid-a", "uid-b"), /^[A-Za-z0-9_-]+$/);
+});
+
+test("contact key exchange accepts real P-256 public keys only", () => {
+  const keyPair = createECDH("prime256v1");
+  keyPair.generateKeys();
+  const publicKey = keyPair.getPublicKey("base64url", "uncompressed");
+  assert.equal(isValidKeyAgreementPublicKey(publicKey), true);
+  assert.equal(isValidKeyAgreementPublicKey("A".repeat(87)), false);
+  assert.equal(isValidKeyAgreementPublicKey("short"), false);
+});
+
+test("invite verifiers are validated and compared in constant time", () => {
+  const verifier =
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+  assert.equal(isValidInviteSecretHash(verifier), true);
+  assert.equal(isValidInviteSecretHash("invalid"), false);
+  assert.equal(inviteSecretHashMatches(verifier, verifier), true);
+  assert.equal(inviteSecretHashMatches(verifier, "0".repeat(64)), false);
 });
 
 test("only supported disappearing-message durations are accepted", () => {

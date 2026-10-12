@@ -44,9 +44,15 @@ class _ChatsScreenState extends State<ChatsScreen>
       duration: const Duration(milliseconds: 620),
     )..forward();
     if (!widget.decoyMode) {
+      _service.contactsChanged.addListener(_contactsChanged);
       _subscribe();
       _maybeShowReleaseNotes();
     }
+  }
+
+  void _contactsChanged() {
+    if (!mounted || widget.decoyMode) return;
+    setState(_subscribe);
   }
 
   /// Right after installing a newer build, the latest release matches the
@@ -160,6 +166,9 @@ class _ChatsScreenState extends State<ChatsScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (!widget.decoyMode) {
+      _service.contactsChanged.removeListener(_contactsChanged);
+    }
     for (final subs in _subscriptions.values) {
       for (final sub in subs) {
         sub.cancel();
@@ -201,7 +210,7 @@ class _ChatsScreenState extends State<ChatsScreen>
       final route = messagingRoute(
         video == null
             ? ChatScreen(
-                contactName: profile['name'] ?? 'Paired contact',
+                contactName: _contactTitle(code, profile),
                 contactPhoto: profile['photo'],
               )
             : CallScreen(isVideo: video, contactName: profile['name']),
@@ -290,15 +299,29 @@ class _ChatsScreenState extends State<ChatsScreen>
     return '${date.hour % 12 == 0 ? 12 : date.hour % 12}:${date.minute.toString().padLeft(2, '0')} ${date.hour < 12 ? 'am' : 'pm'}';
   }
 
+  String _contactTitle(String room, Map<String, String> profile) {
+    final name = profile['name'];
+    if (name != null && name.trim().isNotEmpty && name != 'Calculator user') {
+      return name;
+    }
+    final localLabel = _service.pairedRooms[room];
+    if (localLabel != null && localLabel.isNotEmpty) {
+      return localLabel.startsWith('Contact ')
+          ? localLabel.substring('Contact '.length)
+          : localLabel;
+    }
+    return 'Paired contact';
+  }
+
   @override
   Widget build(BuildContext context) {
     final codes = widget.decoyMode
         ? <String>[]
         : (_service.pairedRooms.keys.where((code) {
             final p = _service.partnerProfile(code, _rooms[code]?['profiles']);
-            return '${p['name'] ?? 'Paired contact'} $code'
-                .toLowerCase()
-                .contains(_query.toLowerCase());
+            return '${_contactTitle(code, p)} $code'.toLowerCase().contains(
+              _query.toLowerCase(),
+            );
           }).toList()..sort((a, b) {
             final ma = _messages(a), mb = _messages(b);
             return (mb.isEmpty ? 0 : (mb.first['timestamp'] as int? ?? 0))
@@ -373,7 +396,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                         const SizedBox(width: 10),
                         const Expanded(
                           child: Text(
-                            'Security update: pair each contact again using a secure invite. Old room codes alone no longer open conversations.',
+                            'Security update: old room codes alone no longer open conversations. Add a contact by Personal ID, or use a legacy secure invite.',
                             style: TextStyle(color: Color(0xFF594300)),
                           ),
                         ),
@@ -419,7 +442,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                       ? codes.isEmpty
                             ? _empty(
                                 'Your private conversations',
-                                'Pair a device to start chatting. Your contacts appear here.',
+                                'Add a contact by Personal ID. Approved contacts appear here.',
                                 Icons.forum_outlined,
                                 action: FilledButton.icon(
                                   onPressed: _pair,
@@ -427,7 +450,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                                     backgroundColor: chatGreen,
                                   ),
                                   icon: const Icon(Icons.add_comment_outlined),
-                                  label: const Text('Pair a device'),
+                                  label: const Text('Add contact'),
                                 ),
                               )
                             : ListView.builder(
@@ -461,7 +484,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                                         ),
                                       ),
                                       title: Text(
-                                        profile['name'] ?? 'Paired contact',
+                                        _contactTitle(code, profile),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontSize: 18),
@@ -560,7 +583,7 @@ class _ChatsScreenState extends State<ChatsScreen>
                               ListTile(
                                 leading: ProfileAvatar(photo: profile['photo']),
                                 title: Text(
-                                  profile['name'] ?? 'Paired contact',
+                                  _contactTitle(code, profile),
                                   style: missedMine
                                       ? const TextStyle(
                                           color: Color(0xFFE5484D),
@@ -589,7 +612,7 @@ class _ChatsScreenState extends State<ChatsScreen>
           ? FloatingActionButton(
               backgroundColor: chatGreen,
               foregroundColor: Colors.white,
-              tooltip: 'Pair new contact',
+              tooltip: 'Add contact by Personal ID',
               onPressed: _pair,
               child: const Icon(Icons.add_comment),
             )

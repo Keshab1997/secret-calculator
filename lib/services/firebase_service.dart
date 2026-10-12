@@ -15,6 +15,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'encryption_service.dart';
+import 'key_agreement_service.dart';
 
 /// A photo upload that failed with a reason worth showing the person who
 /// sent it.
@@ -48,6 +49,7 @@ class FirebaseService {
   /// Unambiguous 6-character code alphabet (excludes 0, O, 1, I).
   static const String codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   static const int roomCodeLength = 6;
+  static const int personalIdLength = 10;
   static const int roomSecretLengthBytes = 32;
   static const String defaultPasscode = '1997';
   static const String functionRegion = 'asia-southeast1';
@@ -63,11 +65,17 @@ class FirebaseService {
 
   static final Random _random = Random.secure();
   static final RegExp _validCodePattern = RegExp(r'^[A-Z0-9]{6}$');
+  static final RegExp _validPersonalIdPattern = RegExp(r'^[A-HJ-NP-Z2-9]{10}$');
   static final RegExp _validPasscodePattern = RegExp(r'^[0-9]{4,8}$');
   static final RegExp _validRoomSecretPattern = RegExp(r'^[A-Za-z0-9_-]{43}$');
+  static final RegExp _validContactRequestIdPattern = RegExp(
+    r'^[A-Za-z0-9_-]{22}$',
+  );
 
   final Map<String, String> _pairedRooms = {};
   final Map<String, String> _roomSecrets = {};
+  final Set<String> _contactRooms = {};
+  final Map<String, Future<String>> _contactAcceptanceOperations = {};
   final Map<String, String>? _secureStorageOverride;
   bool _needsRePair = false;
   Map<String, String> _profile = {
@@ -78,8 +86,16 @@ class FirebaseService {
   Map<String, String> get profile => Map.unmodifiable(_profile);
 
   String _peerId;
+  String? _personalId;
+  Future<String>? _personalIdFetch;
+  bool _personalIdVerified = false;
   DatabaseReference? _chatRef;
+  StreamSubscription<DatabaseEvent>? _contactLinksSubscription;
+  StreamSubscription<DatabaseEvent>? _databaseConnectionSubscription;
+  Future<void> _contactDirectoryQueue = Future<void>.value();
+  bool _contactsServerConfirmed = false;
   String? _roomId;
+  final ValueNotifier<int> contactRevisionNotifier = ValueNotifier(0);
   bool _isPaired = false;
   bool _isOnline = true;
   bool? _lastWrittenOnline;
@@ -111,6 +127,12 @@ class FirebaseService {
 
   /// Unique per-install/session peer identifier used as `senderId` and status key.
   String get peerId => _peerId;
+
+  /// Stable Personal ID for this anonymous Firebase installation.
+  String? get personalId => _personalId;
+
+  /// Notifies the directory when a contact request is accepted/revoked.
+  ValueListenable<int> get contactsChanged => contactRevisionNotifier;
 
   /// Alias for [peerId].
   String get myPeerId => _peerId;
@@ -242,6 +264,24 @@ class FirebaseService {
     return _validCodePattern.hasMatch(normalized);
   }
 
+  /// Normalizes a displayed, optionally hyphenated Personal ID for lookup.
+  static String? normalizePersonalId(String value) {
+    final normalized = value.trim().toUpperCase().replaceAll(
+      RegExp(r'[\s-]'),
+      '',
+    );
+    return _validPersonalIdPattern.hasMatch(normalized) ? normalized : null;
+  }
+
+  static bool isValidPersonalId(String value) =>
+      normalizePersonalId(value) != null;
+
+  static String formatPersonalId(String value) {
+    final normalized = normalizePersonalId(value);
+    if (normalized == null) return value;
+    return '${normalized.substring(0, 5)}-${normalized.substring(5)}';
+  }
+
   /// Returns true when [passcode] is 4–8 numeric digits.
   static bool isValidPasscode(String passcode) {
     return _validPasscodePattern.hasMatch(passcode.trim());
@@ -357,14 +397,31 @@ class FirebaseService {
           _decoyPasscode = protectedDecoy.trim();
         }
         await _saveState();
+        unawaited(_startContactSync());
         return;
       }
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map) return;
+      if (decoded is! Map) {
+        unawaited(_startContactSync());
+        return;
+      }
 
       final savedPeer = decoded['peerId'];
       if (savedPeer is String && savedPeer.length == 16) {
         _peerId = savedPeer;
+      }
+      final savedPersonalId = decoded['personalId'];
+      if (savedPersonalId is String && isValidPersonalId(savedPersonalId)) {
+        _personalId = normalizePersonalId(savedPersonalId);
+      }
+      final savedContactRooms = decoded['contactRooms'];
+      if (savedContactRooms is List) {
+        _contactRooms.addAll(
+          savedContactRooms
+              .whereType<String>()
+              .map((room) => room.trim().toUpperCase())
+              .where(isValidRoomCode),
+        );
       }
 
       final savedPasscode = decoded['customPasscode'];
@@ -453,7 +510,7 @@ class FirebaseService {
           _roomSecrets[room] = secret;
         } else {
           _pairedRooms.remove(room);
-          _needsRePair = true;
+          if (!_contactRooms.contains(room)) _needsRePair = true;
         }
       }
 
@@ -477,8 +534,10 @@ class FirebaseService {
 
       // Rewrite migrated state without secrets in the JSON file.
       await _saveState(strict: true);
+      unawaited(_startContactSync());
     } catch (_) {
       // Keep startup usable if local state or the platform secure store is damaged.
+      unawaited(_startContactSync());
     }
   }
 
@@ -490,6 +549,8 @@ class FirebaseService {
           'pairedRooms': _pairedRooms,
           'profile': _profile,
           'peerId': _peerId,
+          'personalId': _personalId,
+          'contactRooms': _contactRooms.toList(),
           'roomId': _isPaired ? _roomId : null,
           'needsRePair': _needsRePair,
           'biometricEnabled': _biometricEnabled,
@@ -503,6 +564,408 @@ class FirebaseService {
       if (strict) rethrow;
       // Legacy settings remain best-effort in restricted environments.
     }
+  }
+
+  static String _contactRequestPrivateStorageKey(String requestId) =>
+      'contact_request_private_v1_$requestId';
+  static String _acceptContactPrivateStorageKey(String requestId) =>
+      'contact_accept_private_v1_$requestId';
+  static String _acceptContactPublicStorageKey(String requestId) =>
+      'contact_accept_public_v1_$requestId';
+
+  /// Gets the per-install Personal ID from the authenticated server record.
+  Future<String> getOrCreatePersonalId() {
+    final knownId = _personalId;
+    if (_personalIdVerified && knownId != null) return Future.value(knownId);
+    final pending = _personalIdFetch;
+    if (pending != null) return pending;
+    final fetch = _fetchPersonalId();
+    _personalIdFetch = fetch;
+    return fetch.whenComplete(() {
+      if (identical(_personalIdFetch, fetch)) _personalIdFetch = null;
+    });
+  }
+
+  Future<String> _fetchPersonalId() async {
+    _requireAuthenticatedUid();
+    final result = await _functions
+        .httpsCallable('getOrCreatePersonalId')
+        .call<dynamic>();
+    final raw = result.data;
+    final data = raw is Map ? Map<String, dynamic>.from(raw) : null;
+    final value = data?['personalId'];
+    if (value is! String || !isValidPersonalId(value)) {
+      throw StateError('The server returned an invalid Personal ID.');
+    }
+    _personalId = normalizePersonalId(value);
+    _personalIdVerified = true;
+    await _saveState();
+    return _personalId!;
+  }
+
+  /// Incoming requests are readable only to this installation's Auth UID.
+  Stream<DatabaseEvent> incomingContactRequests() {
+    final uid = authUid;
+    if (Firebase.apps.isEmpty || uid == null) return const Stream.empty();
+    return _db.ref('users/$uid/requests').onValue;
+  }
+
+  /// Tracks the current installation's outgoing request statuses.
+  Stream<DatabaseEvent> sentContactRequests() {
+    final uid = authUid;
+    if (Firebase.apps.isEmpty || uid == null) return const Stream.empty();
+    return _db.ref('users/$uid/sentRequests').onValue.map((event) {
+      final raw = event.snapshot.value;
+      if (raw is Map) {
+        for (final entry in raw.values) {
+          if (entry is Map && entry['status'] == 'rejected') {
+            final requestId = entry['requestId'];
+            if (requestId is String) {
+              unawaited(discardContactRequestKey(requestId));
+            }
+          }
+        }
+      }
+      return event;
+    });
+  }
+
+  /// Sends an approval request to the owner of [enteredPersonalId].
+  Future<String> sendContactRequest(String enteredPersonalId) async {
+    final personalId = normalizePersonalId(enteredPersonalId);
+    if (personalId == null) {
+      throw const FormatException('Enter a valid 10-character Personal ID.');
+    }
+    _requireAuthenticatedUid();
+    await getOrCreatePersonalId();
+    final requestId = base64UrlEncode(
+      List<int>.generate(16, (_) => _random.nextInt(256)),
+    ).replaceAll('=', '');
+    final keyPair = KeyAgreementService.generateKeyPair();
+    await _writeProtectedValue(
+      _contactRequestPrivateStorageKey(requestId),
+      keyPair.privateKey,
+    );
+    try {
+      await _functions.httpsCallable('sendContactRequest').call<dynamic>({
+        'personalId': personalId,
+        'requestId': requestId,
+        'peerId': _peerId,
+        'publicKey': keyPair.publicKey,
+      });
+      return requestId;
+    } on FirebaseFunctionsException catch (error) {
+      if (!_mayHaveCommittedContactRequest(error.code)) {
+        await _deleteProtectedValue(
+          _contactRequestPrivateStorageKey(requestId),
+        );
+      }
+      rethrow;
+    }
+  }
+
+  static bool _mayHaveCommittedContactRequest(String code) => const {
+    'cancelled',
+    'deadline-exceeded',
+    'internal',
+    'unknown',
+    'unavailable',
+  }.contains(code);
+
+  /// Accepts a pending request, derives/stores the room key locally, then
+  /// opens the new private conversation. No room secret is sent to Functions.
+  Future<String> acceptContactRequest(String requestId) async {
+    if (!_validContactRequestIdPattern.hasMatch(requestId)) {
+      throw const FormatException('Invalid contact request ID.');
+    }
+    final pending = _contactAcceptanceOperations[requestId];
+    if (pending != null) return pending;
+    final operation = _acceptContactRequestInternal(requestId);
+    _contactAcceptanceOperations[requestId] = operation;
+    try {
+      return await operation;
+    } finally {
+      _contactAcceptanceOperations.remove(requestId);
+    }
+  }
+
+  Future<String> _acceptContactRequestInternal(String requestId) async {
+    _requireAuthenticatedUid();
+    var privateKey = await _readProtectedValue(
+      _acceptContactPrivateStorageKey(requestId),
+    );
+    var publicKey = await _readProtectedValue(
+      _acceptContactPublicStorageKey(requestId),
+    );
+    if (privateKey == null || publicKey == null) {
+      await _deleteProtectedValue(_acceptContactPrivateStorageKey(requestId));
+      await _deleteProtectedValue(_acceptContactPublicStorageKey(requestId));
+      final keyPair = KeyAgreementService.generateKeyPair();
+      await _writeProtectedValue(
+        _acceptContactPrivateStorageKey(requestId),
+        keyPair.privateKey,
+      );
+      await _writeProtectedValue(
+        _acceptContactPublicStorageKey(requestId),
+        keyPair.publicKey,
+      );
+      privateKey = keyPair.privateKey;
+      publicKey = keyPair.publicKey;
+    }
+
+    final result = await _functions
+        .httpsCallable('acceptContactRequest')
+        .call<dynamic>({
+          'requestId': requestId,
+          'peerId': _peerId,
+          'publicKey': publicKey,
+        });
+    final raw = result.data;
+    if (raw is! Map) throw StateError('The server returned invalid room data.');
+    final contact = Map<String, dynamic>.from(raw);
+    final roomId = contact['roomId'];
+    final otherPublicKey = contact['otherPublicKey'];
+    if (roomId is! String ||
+        !isValidRoomCode(roomId) ||
+        otherPublicKey is! String) {
+      throw StateError('The server returned invalid contact keys.');
+    }
+    var secret = _roomSecrets[roomId];
+    secret ??= await _readProtectedValue(_roomSecretStorageKey(roomId));
+    if (secret == null || !_validRoomSecretPattern.hasMatch(secret)) {
+      if (contact['selfPublicKey'] != publicKey) {
+        throw StateError(
+          'The approved key is not available on this device. Restart pairing.',
+        );
+      }
+      secret = KeyAgreementService.deriveRoomSecret(
+        privateKey: privateKey,
+        peerPublicKey: otherPublicKey,
+        roomId: roomId,
+      );
+    }
+    await _writeProtectedValue(_roomSecretStorageKey(roomId), secret);
+    _roomSecrets[roomId] = secret;
+    await _deleteProtectedValue(_acceptContactPrivateStorageKey(requestId));
+    await _deleteProtectedValue(_acceptContactPublicStorageKey(requestId));
+    if (!await _queueContactLinkFromServer(roomId)) {
+      throw StateError('This contact was unlinked before setup completed.');
+    }
+    await selectRoom(roomId);
+    await markRoomPaired();
+    return roomId;
+  }
+
+  /// Removes an unused, rejected request's local ECDH private scalar.
+  Future<void> discardContactRequestKey(String requestId) async {
+    if (!_validContactRequestIdPattern.hasMatch(requestId)) return;
+    await _deleteProtectedValue(_contactRequestPrivateStorageKey(requestId));
+  }
+
+  /// Declines a request without creating a room or contact entry.
+  Future<void> rejectContactRequest(String requestId) async {
+    if (!_validContactRequestIdPattern.hasMatch(requestId)) {
+      throw const FormatException('Invalid contact request ID.');
+    }
+    _requireAuthenticatedUid();
+    await _functions.httpsCallable('rejectContactRequest').call<dynamic>({
+      'requestId': requestId,
+    });
+    await _deleteProtectedValue(_acceptContactPrivateStorageKey(requestId));
+    await _deleteProtectedValue(_acceptContactPublicStorageKey(requestId));
+  }
+
+  Future<bool> _queueContactLinkFromServer(String roomId) {
+    var linked = false;
+    final uid = _requireAuthenticatedUid();
+    final next = _contactDirectoryQueue.then((_) async {
+      final snapshot = await _db.ref('users/$uid/contacts/$roomId').get();
+      if (!snapshot.exists || snapshot.value is! Map) return;
+      linked = true;
+      final data = Map<String, dynamic>.from(snapshot.value as Map);
+      if (await _applyContactLink(roomId, data)) {
+        contactRevisionNotifier.value += 1;
+        await _saveState();
+      }
+    });
+    _contactDirectoryQueue = next.catchError((Object _) {});
+    return next.then((_) => linked);
+  }
+
+  Future<void> _queueContactDirectory(
+    Object? value, {
+    bool allowPruning = true,
+  }) {
+    final next = _contactDirectoryQueue.then(
+      (_) => _applyContactDirectory(value, allowPruning: allowPruning),
+    );
+    _contactDirectoryQueue = next.catchError((Object _) {});
+    return next;
+  }
+
+  Future<void> _ensurePersonalIdBestEffort() async {
+    try {
+      await getOrCreatePersonalId();
+    } catch (_) {
+      // Pairing screen can retry when this installation comes back online.
+    }
+  }
+
+  Future<void> _startContactSync() async {
+    final uid = authUid;
+    if (Firebase.apps.isEmpty || uid == null) return;
+    unawaited(_ensurePersonalIdBestEffort());
+    final reference = _db.ref('users/$uid/contacts');
+    try {
+      _contactLinksSubscription ??= reference.onValue.listen(
+        (event) => unawaited(
+          _queueContactDirectory(
+            event.snapshot.value,
+            allowPruning: _contactsServerConfirmed,
+          ).catchError((Object _) {}),
+        ),
+        onError: (Object _) {},
+      );
+      _databaseConnectionSubscription ??= _db
+          .ref('.info/connected')
+          .onValue
+          .listen((event) {
+            _contactsServerConfirmed = event.snapshot.value == true;
+            if (_contactsServerConfirmed) {
+              unawaited(_refreshContactDirectory(reference));
+            }
+          }, onError: (Object _) {});
+      _contactsServerConfirmed =
+          (await _db.ref('.info/connected').get()).value == true;
+      final snapshot = await reference.get();
+      await _queueContactDirectory(
+        snapshot.value,
+        allowPruning: _contactsServerConfirmed,
+      );
+    } catch (_) {
+      // The app remains usable while the user prepares to deploy database rules.
+    }
+  }
+
+  Future<void> _refreshContactDirectory(DatabaseReference reference) async {
+    try {
+      final snapshot = await reference.get();
+      await _queueContactDirectory(snapshot.value, allowPruning: true);
+    } catch (_) {}
+  }
+
+  Future<void> _applyContactDirectory(
+    Object? value, {
+    bool allowPruning = true,
+  }) async {
+    final records = value is Map ? value : const <Object?, Object?>{};
+    final serverRoomIds = <String>{};
+    var changed = false;
+    for (final entry in records.entries) {
+      final roomId = entry.key?.toString().trim().toUpperCase();
+      final raw = entry.value;
+      if (roomId == null || !isValidRoomCode(roomId) || raw is! Map) continue;
+      serverRoomIds.add(roomId);
+      final data = Map<String, dynamic>.from(raw);
+      if (await _applyContactLink(roomId, data)) changed = true;
+    }
+
+    if (allowPruning) {
+      final staleRooms = _contactRooms.difference(serverRoomIds).toList();
+      for (final roomId in staleRooms) {
+        _contactRooms.remove(roomId);
+        _pairedRooms.remove(roomId);
+        _roomSecrets.remove(roomId);
+        _partnerProfileCache.remove(roomId);
+        await _deleteProtectedValue(_roomSecretStorageKey(roomId));
+        if (_roomId == roomId) {
+          _roomId = null;
+          _chatRef = null;
+          _isPaired = false;
+          _encryption.resetKey();
+        }
+        changed = true;
+      }
+    }
+    if (changed) {
+      contactRevisionNotifier.value += 1;
+      await _saveState();
+      try {
+        await _publishProfile();
+      } catch (_) {}
+      await registerFcmToken();
+    }
+  }
+
+  Future<bool> _applyContactLink(
+    String roomId,
+    Map<String, dynamic> data,
+  ) async {
+    final otherPersonalId = data['otherPersonalId'];
+    final otherPublicKey = data['otherPublicKey'];
+    final requestId = data['requestId'];
+    if (otherPersonalId is! String ||
+        !isValidPersonalId(otherPersonalId) ||
+        otherPublicKey is! String ||
+        requestId is! String ||
+        !_validContactRequestIdPattern.hasMatch(requestId)) {
+      return false;
+    }
+
+    final alreadyRegistered =
+        _contactRooms.contains(roomId) &&
+        _pairedRooms.containsKey(roomId) &&
+        _roomSecrets.containsKey(roomId);
+    var secret = _roomSecrets[roomId];
+    if (secret == null || !_validRoomSecretPattern.hasMatch(secret)) {
+      secret = await _readProtectedValue(_roomSecretStorageKey(roomId));
+    }
+    if (secret == null || !_validRoomSecretPattern.hasMatch(secret)) {
+      final requesterPrivateKey = await _readProtectedValue(
+        _contactRequestPrivateStorageKey(requestId),
+      );
+      final acceptorPrivateKey = await _readProtectedValue(
+        _acceptContactPrivateStorageKey(requestId),
+      );
+      try {
+        if (requesterPrivateKey != null) {
+          secret = KeyAgreementService.deriveRoomSecret(
+            privateKey: requesterPrivateKey,
+            peerPublicKey: otherPublicKey,
+            roomId: roomId,
+          );
+          await _deleteProtectedValue(
+            _contactRequestPrivateStorageKey(requestId),
+          );
+        } else if (acceptorPrivateKey != null) {
+          secret = KeyAgreementService.deriveRoomSecret(
+            privateKey: acceptorPrivateKey,
+            peerPublicKey: otherPublicKey,
+            roomId: roomId,
+          );
+          await _deleteProtectedValue(
+            _acceptContactPrivateStorageKey(requestId),
+          );
+          await _deleteProtectedValue(
+            _acceptContactPublicStorageKey(requestId),
+          );
+        }
+      } on FormatException {
+        return false;
+      }
+      if (secret == null) return false;
+      await _writeProtectedValue(_roomSecretStorageKey(roomId), secret);
+    }
+
+    _roomSecrets[roomId] = secret;
+    _contactRooms.add(roomId);
+    _pairedRooms[roomId] = 'Contact ${formatPersonalId(otherPersonalId)}';
+    if (_roomId == roomId) _encryption.setRoomKey(secret);
+    if (!alreadyRegistered) {
+      _partnerProfileCache.remove(roomId);
+      return true;
+    }
+    return false;
   }
 
   /// Switches the messaging side between system / light / dark.
@@ -598,7 +1061,21 @@ class FirebaseService {
     try {
       await updateOnlineStatus(false);
     } catch (_) {}
-    if (room != null && Firebase.apps.isNotEmpty && uid != null) {
+    final isContactRoom = room != null && _contactRooms.contains(room);
+    if (isContactRoom && Firebase.apps.isNotEmpty && uid != null) {
+      // Do not locally unlink if the server cannot update both private
+      // directories; that would leave the other person's contact stale.
+      try {
+        await _functions.httpsCallable('leaveContactRoom').call<dynamic>({
+          'roomId': room,
+        });
+      } catch (_) {
+        try {
+          await updateOnlineStatus(true);
+        } catch (_) {}
+        rethrow;
+      }
+    } else if (room != null && Firebase.apps.isNotEmpty && uid != null) {
       try {
         final roomRef = _db.ref('rooms/$room');
         await roomRef.child('tokens/$_peerId').remove();
@@ -606,15 +1083,17 @@ class FirebaseService {
         await roomRef.child('profiles/$_peerId').remove();
         await roomRef.child('members/$uid').remove();
       } catch (_) {
-        // Local unpair still completes; a stale membership can be removed later.
+        // Legacy local unpair still completes; a stale membership can be removed later.
       }
     }
     if (room != null) {
       _pairedRooms.remove(room);
       _roomSecrets.remove(room);
+      _contactRooms.remove(room);
       try {
         await _deleteProtectedValue(_roomSecretStorageKey(room));
       } catch (_) {}
+      contactRevisionNotifier.value += 1;
     }
     _roomId = null;
     _chatRef = null;
@@ -666,8 +1145,8 @@ class FirebaseService {
     }
   }
 
-  /// Creates a room through a callable so the database stores only a hash of
-  /// the independent invite secret, never the secret itself.
+  /// Creates a room through a callable using a one-way invite verifier; the
+  /// room encryption secret itself never leaves this device.
   Future<String> createRoom() async {
     _requireAuthenticatedUid();
     for (var attempt = 0; attempt < 8; attempt++) {
@@ -678,7 +1157,7 @@ class FirebaseService {
         await _functions.httpsCallable('createRoomSecure').call({
           'roomId': code,
           'peerId': _peerId,
-          'inviteSecret': secret,
+          'inviteSecretHash': KeyAgreementService.hashInviteSecret(secret),
         });
         _roomSecrets[code] = secret;
         _roomId = code;
@@ -698,8 +1177,8 @@ class FirebaseService {
     throw StateError('Could not reserve a unique room code. Please retry.');
   }
 
-  /// Joins with the full `ROOMID.SECRET` invite. The callable validates the
-  /// secret before adding this authenticated device as the second member.
+  /// Joins with the full `ROOMID.SECRET` invite. The callable receives only
+  /// its SHA-256 verifier before adding this authenticated device as a member.
   Future<bool> joinRoom(String invitation) async {
     final parsed = parseInviteCode(invitation);
     if (parsed == null) return false;
@@ -713,7 +1192,7 @@ class FirebaseService {
       await _functions.httpsCallable('joinRoomSecure').call({
         'roomId': parsed.roomId,
         'peerId': _peerId,
-        'inviteSecret': parsed.secret,
+        'inviteSecretHash': KeyAgreementService.hashInviteSecret(parsed.secret),
       });
     } on FirebaseFunctionsException catch (error) {
       await _deleteProtectedValue(_roomSecretStorageKey(parsed.roomId));
