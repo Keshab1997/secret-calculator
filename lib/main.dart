@@ -55,9 +55,7 @@ void main() async {
   // secure-store read it waits on: a wedged platform keystore would otherwise
   // hold the first frame back the same way.
   try {
-    await firebaseService.loadSavedState().timeout(
-      const Duration(seconds: 10),
-    );
+    await firebaseService.loadSavedState().timeout(const Duration(seconds: 10));
   } catch (error) {
     debugPrint('Loading saved state failed: $error');
   }
