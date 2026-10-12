@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:ui' show PlatformDispatcher;
 
 import 'package:firebase_core/firebase_core.dart';
@@ -31,17 +32,27 @@ void main() async {
 
   FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   final firebaseService = FirebaseService();
-  try {
-    await firebaseService.ensureAuthenticated();
-  } catch (error) {
-    // Keep the calculator usable even if Anonymous Auth has not yet been
-    // enabled in Firebase Console; secure pairing will explain the setup need.
-    debugPrint('Firebase anonymous sign-in unavailable: $error');
-  }
+  // Only local work may sit between the launch screen and the first frame.
+  // A network sign-in held that spot before, and signInAnonymously() has no
+  // timeout of its own: on a device that cannot reach Firebase the app sat
+  // on the native splash forever — a try/catch catches errors, not a hang.
   await firebaseService.loadSavedState();
-  await NotificationService().initialize();
-  // Fire-and-forget: publishes the FCM token for closed-app notifications.
-  FirebaseService().registerFcmToken();
+  unawaited(
+    firebaseService
+        .ensureAuthenticated()
+        .then((_) {
+          // Fire-and-forget: publishes the FCM token for closed-app
+          // notifications once the anonymous identity exists.
+          return firebaseService.registerFcmToken();
+        })
+        .catchError((Object error) {
+          // Keep the calculator usable even if Anonymous Auth has not yet been
+          // enabled in Firebase Console; secure pairing will explain the setup
+          // need.
+          debugPrint('Firebase anonymous sign-in unavailable: $error');
+        }),
+  );
+  unawaited(NotificationService().initialize());
   runApp(const CalculatorApp());
 }
 

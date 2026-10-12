@@ -293,12 +293,22 @@ class FirebaseService {
     await loadSavedState();
   }
 
+  Future<void>? _pendingAuth;
+
   /// Creates a persistent anonymous Firebase identity before any paired data is
   /// read or written. Anonymous sign-in must be enabled in Firebase Console.
-  Future<void> ensureAuthenticated() async {
-    if (Firebase.apps.isEmpty) return;
-    if (FirebaseAuth.instance.currentUser != null) return;
-    await FirebaseAuth.instance.signInAnonymously();
+  ///
+  /// Single-flight: startup fires this in the background while the UI is
+  /// already up, so pairing can ask again before the first call lands — two
+  /// concurrent signInAnonymously() calls would replace one anonymous uid
+  /// with a second one, and rooms are keyed by that uid.
+  Future<void> ensureAuthenticated() {
+    if (Firebase.apps.isEmpty) return Future<void>.value();
+    if (FirebaseAuth.instance.currentUser != null) return Future<void>.value();
+    return _pendingAuth ??= FirebaseAuth.instance
+        .signInAnonymously()
+        .then((_) {})
+        .whenComplete(() => _pendingAuth = null);
   }
 
   @visibleForTesting
