@@ -9,6 +9,7 @@ A familiar calculator on the surface. Enter your private passcode to open an enc
 [![Flutter](https://img.shields.io/badge/Flutter-3.47.7-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
 [![Dart](https://img.shields.io/badge/Dart-3.13-0175C2?logo=dart&logoColor=white)](https://dart.dev)
 [![Android](https://img.shields.io/badge/Android-supported-3DDC84?logo=android&logoColor=white)](https://www.android.com)
+[![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Keshab1997/secret-calculator?label=release)](https://github.com/Keshab1997/secret-calculator/releases)
 
 </div>
@@ -194,7 +195,11 @@ If you receive harmful or illegal content, stop engaging, preserve evidence when
 
 ## 📄 License
 
-This repository is provided for **personal use**. No broader open-source license is granted unless the repository owner adds one explicitly.
+Copyright © 2026 Keshab Sarkar. **All rights reserved.**
+
+This is proprietary source code—not open-source software. Copying, modification, redistribution, building, deployment, commercial use, or creation of derivative works is prohibited without the owner's prior written permission. Public visibility does not grant a license to reuse the code.
+
+See the complete [Proprietary Software License](LICENSE).
 
 ---
 

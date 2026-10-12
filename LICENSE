@@ -1,0 +1,68 @@
+PROPRIETARY SOFTWARE LICENSE
+All Rights Reserved
+
+Copyright (c) 2026 Keshab Sarkar
+
+This source code and all associated documentation, assets, designs, and other
+materials (collectively, the "Software") are proprietary to Keshab Sarkar
+(the "Owner").
+
+NO LICENSE IS GRANTED
+
+Publication or availability of the Software, including availability in a
+source-code repository, does not grant any person or organization a license or
+permission to use the Software except as expressly authorized in writing by the
+Owner.
+
+Without the Owner's prior written permission, you may not, in whole or in part:
+
+1. copy, reproduce, download, archive, mirror, or redistribute the Software;
+2. modify, adapt, translate, or create derivative works from the Software;
+3. compile, build, run, deploy, host, publish, sell, rent, sublicense, or
+   commercially exploit the Software;
+4. use the Software, its source code, design, branding, or assets in another
+   application, product, service, research project, or training dataset;
+5. reverse engineer, decompile, disassemble, or attempt to derive non-public
+   components, protocols, keys, or implementation details from distributed
+   binaries, except only where applicable law expressly prohibits this
+   restriction; or
+6. remove, hide, or alter any copyright, ownership, attribution, or license
+   notice.
+
+LIMITED PLATFORM RIGHTS
+
+If this repository is hosted publicly, the hosting platform's terms may give
+registered users limited technical rights to view or fork the repository using
+platform features. Those platform rights do not grant permission to use,
+modify, distribute, deploy, publish, or commercialize the Software outside the
+minimum actions required by the platform.
+
+AUTHORIZED USE
+
+Any permission must be given in a separate written agreement signed or
+otherwise expressly confirmed by the Owner. Permission for one purpose does not
+imply permission for any other purpose. The Owner may revoke permission
+according to the terms of that agreement.
+
+OWNERSHIP
+
+The Owner retains all right, title, and interest in the Software, including all
+copyright and other intellectual-property rights. No trademark, patent,
+copyright, or other proprietary right is transferred under this notice.
+
+ENFORCEMENT
+
+Unauthorized use may result in takedown requests and any civil or other remedies
+available under applicable law. If you believe you received the Software with
+valid permission, keep a copy of the Owner's written authorization.
+
+NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, TITLE, AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW,
+THE OWNER IS NOT LIABLE FOR ANY CLAIM, LOSS, DAMAGE, OR OTHER LIABILITY ARISING
+FROM THE SOFTWARE OR ITS USE.
+
+For permission requests, contact the Owner through the repository's official
+support or Issues channel.
