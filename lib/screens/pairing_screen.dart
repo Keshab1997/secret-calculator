@@ -73,14 +73,13 @@ class _PairingScreenState extends State<PairingScreen> {
     }
   }
 
-  /// A missing Auth identity is a Firebase Console setup problem (Anonymous
-  /// Auth is off), not a network one — telling the user to check their
-  /// connection for it sends them looking in the wrong place.
+  /// A missing Auth identity is a Firebase configuration problem, not a network
+  /// one, so report the configuration problem the service actually saw (no
+  /// Firebase config in this build, provider switched off, or a refused sign-in)
+  /// instead of guessing: "check your connection" and "enable Anonymous Auth"
+  /// send the person holding the phone to two different places.
   String _personalIdError() {
-    if (_firebase.authUid == null) {
-      return 'Secure pairing needs Firebase Anonymous Authentication. Enable it '
-          'in the Firebase Console, then restart the app.';
-    }
+    if (_firebase.authUid == null) return _firebase.authSetupHint;
     return 'Could not load your Personal ID. Check your connection and Firebase setup.';
   }
 

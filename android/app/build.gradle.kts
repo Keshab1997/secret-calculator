@@ -64,6 +64,13 @@ android {
             } else {
                 signingConfigs.getByName("debug")
             }
+            // Keep Firebase ComponentRegistrars when R8/minify is ever enabled.
+            // With minify off (the default) these files are ignored; they only
+            // take effect if isMinifyEnabled is turned on later.
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }

@@ -154,6 +154,53 @@ class FirebaseService {
   String? get authUid =>
       Firebase.apps.isEmpty ? null : FirebaseAuth.instance.currentUser?.uid;
 
+  /// The Firebase project this build was configured for, or null when the app
+  /// has no Firebase config at all (google-services.json was absent when the
+  /// APK was built). Setup errors name it so a build carrying the wrong config
+  /// cannot pass for a disabled provider.
+  String? get firebaseProjectId =>
+      Firebase.apps.isEmpty ? null : Firebase.app().options.projectId;
+
+  /// Why this device has no signed-in identity, in one line the person holding
+  /// the phone can act on. A build with no Firebase config, a disabled provider
+  /// and a refused sign-in are three different problems with three different
+  /// fixes, so they must not all read "enable Anonymous Authentication".
+  String get authSetupHint {
+    if (Firebase.apps.isEmpty) {
+      return 'This build has no Firebase configuration, so secure pairing is '
+          'unavailable. Install a build that had google-services.json present '
+          'at build time.';
+    }
+    if (anonymousAuthDisabled) {
+      return 'Secure pairing needs Firebase Anonymous Authentication. Enable it '
+          'in the Firebase Console, then restart the app.';
+    }
+    final project = firebaseProjectId;
+    final where = project == null ? '' : ' (Firebase project $project)';
+    final cause = _lastAuthError;
+    if (cause != null) {
+      return 'Secure pairing could not sign this device in$where: $cause';
+    }
+    return 'Secure pairing could not sign this device in$where. Check your '
+        'connection and try again.';
+  }
+
+  /// True when the last sign-in was refused because the Anonymous provider is
+  /// switched off — the one cause the person can fix themselves in the Firebase
+  /// Console, and the only one worth naming.
+  bool get anonymousAuthDisabled {
+    final error = _lastAuthError;
+    if (error is FirebaseAuthException) {
+      return const {
+        'operation-not-allowed',
+        'admin-restricted-operation',
+      }.contains(error.code);
+    }
+    final text = error?.toString() ?? '';
+    return text.contains('OPERATION_NOT_ALLOWED') ||
+        text.contains('CONFIGURATION_NOT_FOUND');
+  }
+
   /// Current custom secret calculator passcode (4–8 digits).
   String get customPasscode => _customPasscode;
 
@@ -295,6 +342,11 @@ class FirebaseService {
 
   Future<void>? _pendingAuth;
 
+  /// The error from the last failed anonymous sign-in, or null when sign-in has
+  /// never failed. Kept so a setup error can name the real cause instead of
+  /// guessing at the provider being switched off.
+  Object? _lastAuthError;
+
   /// Creates a persistent anonymous Firebase identity before any paired data is
   /// read or written. Anonymous sign-in must be enabled in Firebase Console.
   ///
@@ -305,10 +357,45 @@ class FirebaseService {
   Future<void> ensureAuthenticated() {
     if (Firebase.apps.isEmpty) return Future<void>.value();
     if (FirebaseAuth.instance.currentUser != null) return Future<void>.value();
-    return _pendingAuth ??= FirebaseAuth.instance
-        .signInAnonymously()
-        .then((_) {})
-        .whenComplete(() => _pendingAuth = null);
+    return _pendingAuth ??= _signInAnonymously().whenComplete(
+      () => _pendingAuth = null,
+    );
+  }
+
+  /// Sign-in with one retry, because startup fires it without waiting: a single
+  /// dropped request used to leave the pairing screen insisting on Firebase
+  /// Console setup that was already correct. A refusal that a second attempt
+  /// cannot change is not retried — retrying only delays the message.
+  Future<void> _signInAnonymously() async {
+    for (var attempt = 0; ; attempt++) {
+      try {
+        await FirebaseAuth.instance.signInAnonymously();
+        _lastAuthError = null;
+        return;
+      } catch (error) {
+        _lastAuthError = error;
+        if (attempt >= 1 || _isAuthConfigurationRefusal(error)) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 600));
+      }
+    }
+  }
+
+  /// Sign-in failures that describe the app's configuration rather than the
+  /// network, so repeating the request cannot help.
+  static bool _isAuthConfigurationRefusal(Object error) {
+    if (error is FirebaseAuthException) {
+      return const {
+        'operation-not-allowed',
+        'admin-restricted-operation',
+        'invalid-api-key',
+        'api-key-not-valid',
+        'app-not-authorized',
+      }.contains(error.code);
+    }
+    final text = error.toString();
+    return text.contains('OPERATION_NOT_ALLOWED') ||
+        text.contains('CONFIGURATION_NOT_FOUND') ||
+        text.contains('API key not valid');
   }
 
   @visibleForTesting
@@ -343,10 +430,7 @@ class FirebaseService {
   String _requireAuthenticatedUid() {
     final uid = authUid;
     if (uid == null || uid.isEmpty) {
-      throw StateError(
-        'Secure pairing requires Firebase Anonymous Authentication. '
-        'Enable it in Firebase Console, then restart the app.',
-      );
+      throw StateError(authSetupHint);
     }
     return uid;
   }
