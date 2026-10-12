@@ -8,6 +8,7 @@ import '../services/update_service.dart';
 import '../widgets/app_toast.dart';
 import '../widgets/messaging_style.dart';
 import '../widgets/option_sheet.dart';
+import '../widgets/privacy_policy.dart';
 import '../widgets/security_settings.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -458,6 +459,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _card(
           child: Column(
             children: [
+              _tile(
+                icon: Icons.privacy_tip_outlined,
+                title: 'Privacy, safety & acceptable use',
+                subtitle:
+                    'Data handling, security limits and prohibited misuse',
+                onTap: () => showPrivacyPolicy(context),
+              ),
+              const Divider(height: 20),
               _tile(
                 icon: Icons.system_update_outlined,
                 title: 'App version',
