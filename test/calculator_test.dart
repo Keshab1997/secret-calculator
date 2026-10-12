@@ -133,19 +133,22 @@ void main() {
         throwsFormatException,
       );
     });
-    test('custom unlock disables the default code and leaves no history event', () {
-      final engine = CalculatorEngine(customCode: '2580');
-      enter(engine, '12+3=');
-      enter(engine, '258');
-      expect(engine.press('0'), isTrue);
-      expect(engine.expression, isEmpty);
-      expect(engine.output, '0');
-      expect(engine.completedCalculation, isNull);
-      enter(engine, '199');
-      expect(engine.press('7'), isFalse);
-      expect(engine.expression, '1997');
-      expect(engine.completedCalculation, isNull);
-    });
+    test(
+      'custom unlock disables the default code and leaves no history event',
+      () {
+        final engine = CalculatorEngine(customCode: '2580');
+        enter(engine, '12+3=');
+        enter(engine, '258');
+        expect(engine.press('0'), isTrue);
+        expect(engine.expression, isEmpty);
+        expect(engine.output, '0');
+        expect(engine.completedCalculation, isNull);
+        enter(engine, '199');
+        expect(engine.press('7'), isFalse);
+        expect(engine.expression, '1997');
+        expect(engine.completedCalculation, isNull);
+      },
+    );
     test('bounds input length and supports scientific results without nonfinite output', () {
       final engine = CalculatorEngine();
       enter(engine, '1234567890123456789');
