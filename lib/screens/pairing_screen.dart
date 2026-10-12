@@ -493,6 +493,12 @@ class _PairingScreenState extends State<PairingScreen> {
             children: [
               Expanded(
                 child: SelectableText(
+                  // Same PageStorage slot trap as the invite field below:
+                  // without a key of its own, this selectable's internal
+                  // scrollable restores from the tile's saved *bool* under
+                  // 'legacy-pairing' and crashes casting it to a double
+                  // offset — the invite only has to finish generating.
+                  key: const PageStorageKey<String>('legacy-invite-code'),
                   _myInvite!,
                   style: const TextStyle(fontFamily: 'monospace'),
                 ),

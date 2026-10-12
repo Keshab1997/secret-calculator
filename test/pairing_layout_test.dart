@@ -77,4 +77,42 @@ void main() {
       );
     },
   );
+
+  // The invite *display* (a SelectableText) mounts only once an invite has
+  // been generated, so the screen-level test above can never reach it — it
+  // needs working Firebase. This harness reproduces the exact arrangement
+  // the screen uses: a keyless scrollable inside the keyed ExpansionTile
+  // reads the tile's saved expansion bool back as a double scroll offset.
+  // It fails the moment that pattern is reintroduced without its own key.
+  testWidgets('a selectable inside the keyed legacy tile needs its own slot', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ListView(
+            children: [
+              ExpansionTile(
+                key: const PageStorageKey<String>('legacy-pairing'),
+                title: const Text('Legacy secure invite'),
+                children: [
+                  SelectableText(
+                    'ABCD23.EFGH45.KLMN67',
+                    key: const PageStorageKey<String>('legacy-invite-code'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.text('Legacy secure invite'));
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull, reason: 'selectable crashed');
+    expect(find.text('ABCD23.EFGH45.KLMN67'), findsOneWidget);
+  });
 }
