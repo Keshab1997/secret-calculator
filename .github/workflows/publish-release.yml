@@ -35,7 +35,7 @@ permissions:
 
 jobs:
   publish:
-    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.14.1
+    uses: Keshab1997/flutter-builder/.github/workflows/publish-release.yml@v1.15.0
     with:
       # app-name is deliberately omitted: the release takes the app's own
       # name (Calculator). Pass app-name: <Name> only to override it.
