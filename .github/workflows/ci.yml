@@ -16,8 +16,6 @@ concurrency:
 jobs:
   ci:
     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.2
-      with:
-        java-version: "21"
     with:
       flutter-channel: stable
       run-format-check: true
