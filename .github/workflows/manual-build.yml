@@ -18,9 +18,8 @@ permissions:
 jobs:
   build:
     uses: Keshab1997/flutter-builder/.github/workflows/flutter-build.yml@v1.18.2
-      with:
-        java-version: "21"
     with:
+      java-version: "21"
       flutter-channel: stable
       run-analyze: false
       run-tests: false
