@@ -64,3 +64,4 @@ key.properties
 /functions/lib/
 /functions/node_modules/
 /functions/.firebase/
+.agent-pack-backups/
